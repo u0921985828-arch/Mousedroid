@@ -46,7 +46,12 @@ object Monet {
     fun load(ctx: Context) {
         if (ready) return
         ready = true
-        if (Build.VERSION.SDK_INT >= 31) fromSystem(ctx) else fromWallpaper(ctx)
+        val semilla =
+            (if (Build.VERSION.SDK_INT >= 31) systemSeed(ctx) else wallpaperSeed(ctx))
+                ?: Color.parseColor("#5C7A9E")
+        val hsl = FloatArray(3)
+        rgbToHsl(semilla, hsl)
+        ramp(hsl[0])
     }
 
     /** Fuerza una recarga, por ejemplo al volver de segundo plano. */
@@ -55,27 +60,28 @@ object Monet {
         load(ctx)
     }
 
-    private fun fromSystem(ctx: Context) {
-        fun c(id: Int) = ctx.resources.getColor(id, ctx.theme)
-        deckHi = c(android.R.color.system_neutral1_700)
-        deck = c(android.R.color.system_neutral1_800)
-        deckLo = shade(deck, 0.86f)
-        plateHi = c(android.R.color.system_neutral1_900)
-        plateLo = shade(plateHi, 0.82f)
-        glassHi = shade(c(android.R.color.system_neutral2_900), 0.92f)
-        glassLo = shade(glassHi, 0.76f)
-        etch = c(android.R.color.system_neutral1_200)
-        etchDim = c(android.R.color.system_neutral1_400)
-        accent = c(android.R.color.system_accent1_200)
-        accentSoft = c(android.R.color.system_accent1_400)
+    /**
+     * Del sistema se toma el TONO y nada mas.
+     *
+     * Antes se cogian sus tonos enteros, y ahi `system_neutral1_900` (chapa) y
+     * `system_neutral2_900` (cristal) son los dos el tono 10 de la rampa: salian
+     * separados por 2 de 255. En pantalla eso es cero: la banda de clic
+     * desaparecia dentro del cristal y el aparato se leia como una plancha lisa.
+     * Las cotas documentadas solo se cumplian en Android 7..11.
+     */
+    private fun systemSeed(ctx: Context): Int? = try {
+        ctx.resources.getColor(android.R.color.system_accent1_500, ctx.theme)
+    } catch (_: Throwable) {
+        null
     }
 
-    private fun fromWallpaper(ctx: Context) {
-        val seed = wallpaperSeed(ctx) ?: Color.parseColor("#5C7A9E")
-        val hsl = FloatArray(3)
-        rgbToHsl(seed, hsl)
-        val h = hsl[0]
-        // rampa neutra: mismo tono, croma muy bajo
+    /**
+     * La rampa, unica para todas las versiones: mismo tono, croma muy bajo y los
+     * escalones de luminosidad de `usb-mouse-proporciones.html`. Que la separacion
+     * entre deck, chapa y cristal sea SIEMPRE la misma es justo lo que hace que
+     * las piezas se distingan en cualquier movil.
+     */
+    private fun ramp(h: Float) {
         deckHi = hsl(h, 0.05f, 0.31f)
         deck = hsl(h, 0.05f, 0.28f)
         deckLo = hsl(h, 0.05f, 0.24f)

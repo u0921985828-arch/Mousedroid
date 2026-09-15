@@ -101,7 +101,11 @@ el parseo del servidor.
 
 ## Paleta y cotas fijas
 
-Los tonos de `Monet` en la rama sin `system_*` (Android 7–11), en HSL sobre el tono semilla:
+Los tonos de `Monet`, **en todas las versiones**, en HSL sobre el tono semilla. Del sistema se
+toma el tono y nada más: `system_neutral1_900` (chapa) y `system_neutral2_900` (cristal) son los
+dos el tono 10 de Material You y salían separados por 2 de 255, así que la banda de clic
+desaparecía dentro del cristal. Que la separación sea siempre ésta es lo que hace que las piezas
+se distingan en cualquier móvil.
 
 ```
 deckHi  5% 31     plateHi 7% 17     glassHi 9% 11.5    etch     8% 68
@@ -137,6 +141,10 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
 - **El deck vacío bajo el cristal es el diseño, no un hueco**: es el reposamuñecas del portátil
   (`usb-mouse-proporciones.html`). Por eso el cuerpo del panel va con `Gravity.TOP` y no
   centrado: lo que sobra tiene que quedar debajo.
+- **Con relación fija, la fila del panel es `WRAP_CONTENT`, no `MATCH_PARENT`.** El raíl es
+  `MATCH_PARENT` y mide lo que la fila: si la fila se queda con toda la columna, el raíl sale
+  3,7 veces más alto que el cristal y los escalones caen a 1.700 px de lo que gobiernan. En
+  pantalla corta no hay relación fija y ahí sí manda la fila (`Deck.short()`).
 - **La cabecera necesita el inset de la barra de estado.** El modo inmersivo solo esconde la de
   navegación; sin bajar el contenido, el LED, los glifos y el engranaje quedan tapados por el
   reloj. Se hace con `setOnApplyWindowInsetsListener` de plataforma, no con androidx.

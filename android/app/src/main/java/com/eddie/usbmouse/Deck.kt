@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 
@@ -276,12 +277,23 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
         }
 
         override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-            super.onMeasure(widthSpec, heightSpec)
-            if (aspect > 0f) {
-                val w = measuredWidth
-                val h = (w / aspect).toInt().coerceAtMost(measuredHeight)
-                setMeasuredDimension(w, h)
+            if (aspect <= 0f) {
+                super.onMeasure(widthSpec, heightSpec)
+                return
             }
+            val w = MeasureSpec.getSize(widthSpec)
+            var h = (w / aspect).toInt()
+            if (MeasureSpec.getMode(heightSpec) != MeasureSpec.UNSPECIFIED) {
+                h = h.coerceAtMost(MeasureSpec.getSize(heightSpec))
+            }
+            // Se miden los hijos contra la altura DEFINITIVA. Midiendolos contra la
+            // que venia de fuera, el cristal se calculaba el degradado sobre toda
+            // la columna y solo se veia recortado el trozo de arriba.
+            super.onMeasure(
+                MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY)
+            )
+            setMeasuredDimension(w, h)
         }
 
         override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
@@ -386,15 +398,22 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             // en pantallas cortas la relacion real dejaria una superficie inutil:
             // ahi manda la usabilidad y el cristal se estira
             val ratio = if (short()) 0f else 1.62f
+            // Con relacion fija la fila se ciñe al cristal; asi el rail, que es
+            // MATCH_PARENT, mide lo que el cristal y no lo que la pantalla, y los
+            // escalones caen justo debajo en vez de a 1.700 px de distancia.
+            // Sin relacion (pantalla corta) el cristal se estira y la fila manda.
+            val fijo = ratio > 0f
             body.addView(
                 newPadStack(tap = true, twoFinger = true, accelHere = usaAccel,
                     aspect = ratio, band = tier >= 1),
-                LinearLayout.LayoutParams(0, MATCH_PARENT, 1f)
+                LinearLayout.LayoutParams(0, if (fijo) WRAP_CONTENT else MATCH_PARENT, 1f)
             )
             if (tier >= 1) body.addView(rail(false), LinearLayout.LayoutParams(dp(36f), MATCH_PARENT).apply {
                 leftMargin = dp(7f)
             })
-            root.addView(body, LinearLayout.LayoutParams(MATCH_PARENT, 0, 100f))
+            root.addView(body,
+                if (fijo) LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+                else LinearLayout.LayoutParams(MATCH_PARENT, 0, 100f))
 
             if (tier == 2) root.addView(pipsRow(Monet.accentSoft),
                 LinearLayout.LayoutParams(MATCH_PARENT, dp(24f)).apply { topMargin = dp(6f) })
