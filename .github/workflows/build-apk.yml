@@ -80,23 +80,9 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
-            adb install -r UsbMouse.apk
-            adb logcat -c
-            adb shell am start -n com.eddie.usbmouse/.MainActivity
-            sleep 15
-            adb exec-out screencap -p > pantallazo.png
-            echo "--- logcat de la app ---"
-            adb logcat -d | grep -iE "usbmouse|AndroidRuntime" | tail -40 || true
-            if adb logcat -d | grep -q 'FATAL EXCEPTION'; then
-              echo "La app se ha caido:"
-              adb logcat -d | grep -A 30 'FATAL EXCEPTION'
-              exit 1
-            fi
-            adb shell dumpsys activity activities | grep -q 'com.eddie.usbmouse/.MainActivity' || {
-              echo "La Activity no esta arriba pasados 15 s"
-              exit 1
-            }
+          # Una sola linea: esta accion ejecuta el script LINEA A LINEA, cada
+          # una en su propio `sh -c`, asi que un if/then/fi repartido se parte.
+          script: bash .github/scripts/smoke.sh UsbMouse.apk
 
       - uses: actions/upload-artifact@v4
         if: always()
