@@ -30,6 +30,12 @@ jobs:
           java-version: '17'        # jvmTarget del proyecto; AGP 8.5.2 va bien con 17
 
       - uses: android-actions/setup-android@v3
+        with:
+          # Por defecto pide el paquete 'tools', que ya no existe en las
+          # cmdline-tools actuales y tumba a sdkmanager con codigo 1. Se piden
+          # a mano los que necesita compileSdk 34 en vez de fiarlo a que AGP
+          # se los descargue solo.
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Compilar el APK de depuracion
         working-directory: android
