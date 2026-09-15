@@ -29,6 +29,8 @@ cae de vuelta a Python automáticamente.
 **Móvil:**
 1. Abre `android/` en Android Studio → Run (o `cd android && ./gradlew installDebug`,
    `gradlew.bat` en Windows: el wrapper se baja Gradle 8.7 solo la primera vez).
+   Sin SDK a mano: **Actions ▸ Build APK ▸ Run workflow** deja el `UsbMouse.apk` como
+   artefacto del run, listo para descargar e instalar en el móvil.
 2. Vía ADB: activa **Depuración USB** y marca "Permitir siempre desde este equipo".
    Vía anclaje: Ajustes → Conexión compartida → **Anclaje USB**, y marca "Abrir al enchufar" en la app.
 

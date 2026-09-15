@@ -166,6 +166,17 @@ cd server && build-exe.bat && install-autostart.bat
 El vigilante instala la app él solo si el móvil no la tiene: busca `server/UsbMouse.apk` y, si
 no está, el APK de gradle. Se desactiva con `--no-install`, y la bandeja con `--no-tray`.
 
+### Compilar sin SDK local
+
+`.github/workflows/build-apk.yml` compila el APK en un runner y lo sube como artefacto, más un
+trabajo de humo que lo arranca en un emulador. Es la salida cuando el entorno bloquea
+`dl.google.com` y no se puede resolver el plugin de Android.
+
+Si ahí tampoco se puede, el Kotlin se puede *revisar* sin SDK: `org.robolectric:android-all`
+está en Maven Central y es el framework entero de API 34, así que `kotlinc` con ese jar en el
+classpath comprueba los tipos de verdad. No sustituye a una compilación (no hay recursos, ni
+fusión de manifiestos, ni D8), pero es lo que destapó que `ScrollStripView` usaba `aspect`.
+
 ## Pendiente
 
 - Multimedia: `pynput` puede mandar play/pausa y volumen; faltaría un opcode para ellas.
