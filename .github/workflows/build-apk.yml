@@ -14,6 +14,7 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/build-apk.yml'
+      - '.github/scripts/**'
 
 permissions:
   contents: read
@@ -21,6 +22,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # para dejar el APK en la rama 'apk'
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +56,26 @@ jobs:
           name: UsbMouse-apk
           path: UsbMouse.apk
           if-no-files-found: error
+
+      # Ademas del artefacto, el APK va a una rama suelta que solo contiene ese
+      # fichero. El artefacto obliga a pasar por la interfaz de Actions y a estar
+      # identificado; la rama se descarga del propio repo y se puede traer con un
+      # `git fetch`, que es lo unico que atraviesa algunas redes.
+      - name: Publicar el APK en la rama 'apk'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tmp=$(mktemp -d)
+          cp UsbMouse.apk "$tmp/"
+          cd "$tmp"
+          git init -q -b apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add UsbMouse.apk
+          git commit -q -m "APK de ${GITHUB_SHA:0:7}"
+          # sin historia: cada build reemplaza el binario en vez de acumularlos
+          git push -q --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk
 
   smoke:
     # Compilar no es lo mismo que arrancar: esto comprueba que la Activity abre
