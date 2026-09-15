@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
@@ -186,6 +187,23 @@ class MainActivity : Activity(), DeckIO {
             topMargin = dp(9)
         })
         root.addView(colv, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
+        // El modo inmersivo solo esconde la barra de navegacion, no la de estado,
+        // y la ventana se extiende por debajo de esta: la cabecera entera (LED,
+        // glifos, engranaje) quedaba tapada por el reloj y la bateria. Se baja el
+        // contenido justo lo que ocupa esa barra.
+        //
+        // Con la API de plataforma y no con androidx: el resto de la app no usa
+        // ni una clase de la biblioteca de compatibilidad y no vale la pena
+        // empezar por esto. WindowInsets.Type es de API 30, asi que por debajo
+        // se usa el accesor viejo, que cubre desde la 20.
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val arriba =
+                if (Build.VERSION.SDK_INT >= 30) insets.getInsets(WindowInsets.Type.statusBars()).top
+                else @Suppress("DEPRECATION") insets.systemWindowInsetTop
+            colv.setPadding(dp(11), dp(10) + arriba, dp(11), dp(14))
+            insets
+        }
         // el teclado va antes que los ajustes: si por lo que sea coinciden, manda
         // el panel de ajustes, que es el que tiene el boton de aplicar
         root.addView(keys.build(), FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {

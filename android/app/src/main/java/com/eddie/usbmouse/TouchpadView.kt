@@ -47,8 +47,6 @@ class TouchpadView(context: Context) : View(context) {
     var naturalScroll = false
     var tapToClick = true
     var twoFingerScroll = true
-    /** Si es > 0, la vista conserva esa relación ancho/alto (1.62 = trackpad real). */
-    var aspect = 0f
 
     private val d = resources.displayMetrics.density
     private val tapMs = 190L
@@ -105,14 +103,9 @@ class TouchpadView(context: Context) : View(context) {
         invalidate()
     }
 
-    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-        super.onMeasure(widthSpec, heightSpec)
-        if (aspect > 0f) {
-            val w = measuredWidth
-            val h = (w / aspect).toInt().coerceAtMost(measuredHeight)
-            setMeasuredDimension(w, h)
-        }
-    }
+    // Sin onMeasure propio: el cristal llena la pila y es [Deck.PadStack] quien se
+    // ciñe a la relacion 1,62. Si la impusiera el cristal, la banda de clic se
+    // quedaria anclada al fondo de una pila que sigue midiendo toda la columna.
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)

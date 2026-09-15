@@ -130,8 +130,16 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
 - **`PadStack.onSizeChanged`** fija el alto de la banda de clic al 32%. La banda se añade
   después del pad en el `FrameLayout`, así que intercepta el toque antes que el motor de
   gestos: si reordenas los hijos, el clic deja de funcionar.
-- **`TouchpadView.onMeasure`** impone la relación 1,62 solo cuando `aspect > 0`. `Deck` lo pone
-  a 0 en pantallas cortas.
+- **`PadStack.onMeasure`** impone la relación 1,62, **no `TouchpadView`**. Se rompió una vez
+  por esto: con la relación en el cristal, la pila seguía midiendo la columna entera, el cristal
+  se quedaba arriba y la banda, anclada al fondo de la pila, se iba al fondo de la pantalla con
+  400 dp de deck muerto en medio. El 32 % es del cristal, no de la columna.
+- **El deck vacío bajo el cristal es el diseño, no un hueco**: es el reposamuñecas del portátil
+  (`usb-mouse-proporciones.html`). Por eso el cuerpo del panel va con `Gravity.TOP` y no
+  centrado: lo que sobra tiene que quedar debajo.
+- **La cabecera necesita el inset de la barra de estado.** El modo inmersivo solo esconde la de
+  navegación; sin bajar el contenido, el LED, los glifos y el engranaje quedan tapados por el
+  reloj. Se hace con `setOnApplyWindowInsetsListener` de plataforma, no con androidx.
 - **Modo ratón con nivel ≥ 1 apaga `tapToClick` y `twoFingerScroll`** a propósito: con botones
   físicos, un toque en el sensor es un fallo, no una comodidad.
 - **Gaming apaga la aceleración** (`usaAccel = accel && tier != 2`). No lo "arregles": `accel`

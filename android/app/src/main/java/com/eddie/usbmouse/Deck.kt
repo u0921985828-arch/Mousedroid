@@ -244,8 +244,13 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
      * Cristal + halo + (opcional) banda de clic integrada.
      * En el hardware real el clic no es una pieza aparte: es el tercio bajo de la
      * misma lamina de cristal, asi que la banda va DENTRO, no debajo.
+     *
+     * La relacion 1,62 la impone ESTA vista, no el cristal. Cuando la imponia el
+     * cristal, la pila seguia midiendo toda la columna: el cristal se quedaba
+     * arriba y la banda, anclada al fondo de la pila, se iba al fondo de la
+     * pantalla con 400 dp de deck muerto en medio. El 32% es del cristal.
      */
-    private inner class PadStack(withBand: Boolean) : FrameLayout(ctx) {
+    private inner class PadStack(withBand: Boolean, private val aspect: Float) : FrameLayout(ctx) {
         private var band: View? = null
 
         init {
@@ -270,6 +275,15 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             clipChildren = true
         }
 
+        override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+            super.onMeasure(widthSpec, heightSpec)
+            if (aspect > 0f) {
+                val w = measuredWidth
+                val h = (w / aspect).toInt().coerceAtMost(measuredHeight)
+                setMeasuredDimension(w, h)
+            }
+        }
+
         override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
             super.onSizeChanged(w, h, ow, oh)
             band?.let {
@@ -288,8 +302,9 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
         tap: Boolean, twoFinger: Boolean, accelHere: Boolean,
         aspect: Float = 0f, band: Boolean = false
     ): View {
-        padRef = newPad(tap, twoFinger, accelHere).apply { this.aspect = aspect }
-        return PadStack(band)
+        // el cristal llena la pila entera; quien se ciñe a la relacion es la pila
+        padRef = newPad(tap, twoFinger, accelHere)
+        return PadStack(band, aspect)
     }
 
     private fun newPad(tap: Boolean, twoFinger: Boolean, accelHere: Boolean): TouchpadView {
@@ -364,7 +379,9 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             // --------- panel: un trackpad real es 1,62:1 apaisado (130x80 mm)
             val body = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
+                // arriba, no centrado: lo que sobra tiene que quedar DEBAJO del
+                // cristal, que es el reposamuñecas del portatil
+                gravity = android.view.Gravity.TOP
             }
             // en pantallas cortas la relacion real dejaria una superficie inutil:
             // ahi manda la usabilidad y el cristal se estira
