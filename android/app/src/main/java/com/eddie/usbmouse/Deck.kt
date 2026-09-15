@@ -6,10 +6,11 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 
@@ -150,6 +151,9 @@ object Macro {
     const val FWD = "adelante"
     const val G1 = "G1"
     const val G2 = "G2"
+    // G3 y G4 solo existen en el panel: son las esquinas de abajo del cristal
+    const val G3 = "G3"
+    const val G4 = "G4"
     const val SNIPER = "sniper"
 }
 
@@ -251,8 +255,13 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
      * arriba y la banda, anclada al fondo de la pila, se iba al fondo de la
      * pantalla con 400 dp de deck muerto en medio. El 32% es del cristal.
      */
-    private inner class PadStack(withBand: Boolean, private val aspect: Float) : FrameLayout(ctx) {
+    private inner class PadStack(
+        withBand: Boolean,
+        private val aspect: Float,
+        withCorners: Boolean = false
+    ) : FrameLayout(ctx) {
         private var band: View? = null
+        private val corners = ArrayList<View>(4)
 
         init {
             val h = HaloView(ctx)
@@ -270,22 +279,51 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                     topMargin = dp(10f); bottomMargin = dp(10f)
                 })
                 b.addView(key(true, 'r', null), LinearLayout.LayoutParams(0, MATCH_PARENT, 3f))
-                addView(b, LayoutParams(MATCH_PARENT, 1, android.view.Gravity.BOTTOM))
+                addView(b, LayoutParams(MATCH_PARENT, 1, Gravity.BOTTOM))
                 band = b
+            }
+            if (withCorners) {
+                // Las cuatro esquinas macro del prototipo: 26% x 19%, por encima
+                // de la banda, que es lo que hace que en gaming el pulgar tenga
+                // cuatro botones sin levantar la mano del cristal.
+                val sitios = intArrayOf(
+                    Gravity.TOP or Gravity.START, Gravity.TOP or Gravity.END,
+                    Gravity.BOTTOM or Gravity.START, Gravity.BOTTOM or Gravity.END
+                )
+                val tags = arrayOf(Macro.G1, Macro.G2, Macro.G3, Macro.G4)
+                for (i in sitios.indices) {
+                    val c = corner(tags[i])
+                    addView(c, LayoutParams(1, 1, sitios[i]).apply {
+                        setMargins(dp(6f), dp(6f), dp(6f), dp(6f))
+                    })
+                    corners.add(c)
+                }
             }
             clipChildren = true
         }
 
         override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-            if (aspect <= 0f) {
-                super.onMeasure(widthSpec, heightSpec)
-                return
-            }
             val w = MeasureSpec.getSize(widthSpec)
-            var h = (w / aspect).toInt()
-            if (MeasureSpec.getMode(heightSpec) != MeasureSpec.UNSPECIFIED) {
-                h = h.coerceAtMost(MeasureSpec.getSize(heightSpec))
+            var h = MeasureSpec.getSize(heightSpec)
+            if (aspect > 0f) {
+                val deseado = (w / aspect).toInt()
+                h = if (MeasureSpec.getMode(heightSpec) == MeasureSpec.UNSPECIFIED) deseado
+                else deseado.coerceAtMost(h)
             }
+            // Las medidas de banda y esquinas se fijan AQUI, antes de medir a los
+            // hijos y mutando el LayoutParams sin `setLayoutParams`. Estaban en
+            // onSizeChanged, que llega con el layout ya en marcha: pedia otra
+            // pasada de medida desde dentro de la anterior y la banda se quedaba
+            // con el alto de 1 px con el que nace. Era invisible, no ausente.
+            band?.let { (it.layoutParams as LayoutParams).height = bandHeight(w, h) }
+            val lado = (w * 0.26f).toInt()
+            val alto = (h * 0.19f).toInt()
+            corners.forEach {
+                val lp = it.layoutParams as LayoutParams
+                lp.width = lado
+                lp.height = alto
+            }
+
             // Se miden los hijos contra la altura DEFINITIVA. Midiendolos contra la
             // que venia de fuera, el cristal se calculaba el degradado sobre toda
             // la columna y solo se veia recortado el trozo de arriba.
@@ -296,12 +334,42 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             setMeasuredDimension(w, h)
         }
 
-        override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-            super.onSizeChanged(w, h, ow, oh)
-            band?.let {
-                val lp = it.layoutParams as LayoutParams
-                lp.height = (h * 0.32f).toInt()
-                it.layoutParams = lp
+        /**
+         * 32% del alto, pero con el 32% de un cristal de proporción real como
+         * techo. En un trackpad de 1,62 las dos cifras coinciden; cuando el
+         * cristal se estira para llenar la pantalla, la banda mantiene su
+         * profundidad en vez de comerse un tercio de toda la superficie, que es
+         * también lo que pasa en el hardware. Nunca por debajo del objetivo
+         * táctil de 48 dp.
+         */
+        private fun bandHeight(w: Int, h: Int): Int {
+            val real = (w / 1.62f) * 0.32f
+            return (h * 0.32f).coerceAtMost(real).toInt().coerceAtLeast(dp(48f))
+        }
+    }
+
+    /** Zona macro de esquina: no es chapa, es una marca sobre el propio cristal. */
+    private fun corner(tag: String): View {
+        val idle = Color.argb(8, 255, 255, 255)
+        val fondo = GradientDrawable().apply {
+            setColor(idle)
+            cornerRadius = dp(12f).toFloat()
+        }
+        return View(ctx).apply {
+            background = fondo
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        fondo.setColor(Monet.alpha(Monet.accent, 61))
+                        io.haptic()
+                        io.macro(tag, true)
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        fondo.setColor(idle)
+                        io.macro(tag, false)
+                    }
+                }
+                true
             }
         }
     }
@@ -312,11 +380,11 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
 
     private fun newPadStack(
         tap: Boolean, twoFinger: Boolean, accelHere: Boolean,
-        aspect: Float = 0f, band: Boolean = false
+        aspect: Float = 0f, band: Boolean = false, corners: Boolean = false
     ): View {
         // el cristal llena la pila entera; quien se ciñe a la relacion es la pila
         padRef = newPad(tap, twoFinger, accelHere)
-        return PadStack(band, aspect)
+        return PadStack(band, aspect, corners)
     }
 
     private fun newPad(tap: Boolean, twoFinger: Boolean, accelHere: Boolean): TouchpadView {
@@ -395,25 +463,20 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                 // cristal, que es el reposamuñecas del portatil
                 gravity = android.view.Gravity.TOP
             }
-            // en pantallas cortas la relacion real dejaria una superficie inutil:
-            // ahi manda la usabilidad y el cristal se estira
-            val ratio = if (short()) 0f else 1.62f
-            // Con relacion fija la fila se ciñe al cristal; asi el rail, que es
-            // MATCH_PARENT, mide lo que el cristal y no lo que la pantalla, y los
-            // escalones caen justo debajo en vez de a 1.700 px de distancia.
-            // Sin relacion (pantalla corta) el cristal se estira y la fila manda.
-            val fijo = ratio > 0f
+            // El cristal se lleva la columna entera. La relacion 1,62 es el SUELO
+            // —un trackpad nunca es mas apaisado que eso— pero no un techo: en un
+            // movil alto, reservar el reposamuñecas dejaba el 60% de la pantalla
+            // muerta, y aqui el cristal ocupa todo el aparato como en un trackpad
+            // externo, no como el hueco recortado de un portatil.
             body.addView(
                 newPadStack(tap = true, twoFinger = true, accelHere = usaAccel,
-                    aspect = ratio, band = tier >= 1),
-                LinearLayout.LayoutParams(0, if (fijo) WRAP_CONTENT else MATCH_PARENT, 1f)
+                    aspect = 0f, band = tier >= 1, corners = tier == 2),
+                LinearLayout.LayoutParams(0, MATCH_PARENT, 1f)
             )
             if (tier >= 1) body.addView(rail(false), LinearLayout.LayoutParams(dp(36f), MATCH_PARENT).apply {
                 leftMargin = dp(7f)
             })
-            root.addView(body,
-                if (fijo) LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-                else LinearLayout.LayoutParams(MATCH_PARENT, 0, 100f))
+            root.addView(body, LinearLayout.LayoutParams(MATCH_PARENT, 0, 100f))
 
             if (tier == 2) root.addView(pipsRow(Monet.accentSoft),
                 LinearLayout.LayoutParams(MATCH_PARENT, dp(24f)).apply { topMargin = dp(6f) })

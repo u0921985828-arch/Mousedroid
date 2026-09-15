@@ -138,13 +138,21 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   por esto: con la relación en el cristal, la pila seguía midiendo la columna entera, el cristal
   se quedaba arriba y la banda, anclada al fondo de la pila, se iba al fondo de la pantalla con
   400 dp de deck muerto en medio. El 32 % es del cristal, no de la columna.
-- **El deck vacío bajo el cristal es el diseño, no un hueco**: es el reposamuñecas del portátil
-  (`usb-mouse-proporciones.html`). Por eso el cuerpo del panel va con `Gravity.TOP` y no
-  centrado: lo que sobra tiene que quedar debajo.
-- **Con relación fija, la fila del panel es `WRAP_CONTENT`, no `MATCH_PARENT`.** El raíl es
-  `MATCH_PARENT` y mide lo que la fila: si la fila se queda con toda la columna, el raíl sale
-  3,7 veces más alto que el cristal y los escalones caen a 1.700 px de lo que gobiernan. En
-  pantalla corta no hay relación fija y ahí sí manda la fila (`Deck.short()`).
+- **En el panel, el cristal se lleva la columna entera.** `usb-mouse-proporciones.html` describe
+  el deck vacío de debajo como el reposamuñecas de un portátil, pero eso vale cuando el cristal
+  ocupa el 40 % del ancho del chasis; aquí ocupa el 100 %, así que el aparato es un trackpad
+  externo y no el hueco recortado de un portátil. En un móvil 2,2:1 aquello dejaba el 60 % de la
+  pantalla muerta. La relación 1,62 sigue siendo el **suelo** (`PadStack.onMeasure` con
+  `aspect > 0`, que usa el modo ratón), no un techo.
+- **La banda de clic tiene techo**: 32 % del alto, pero como mucho el 32 % de un cristal de 1,62.
+  En un trackpad de proporción real las dos cifras coinciden; con el cristal estirado la banda
+  conserva su profundidad en vez de comerse un tercio de toda la superficie. Nunca baja de 48 dp.
+- **Banda y esquinas se dimensionan en `onMeasure`, no en `onSizeChanged`.** Mutando el
+  `LayoutParams` sin `setLayoutParams` y antes de medir a los hijos. Estaba en `onSizeChanged`,
+  que llega con el layout ya en marcha: pedía otra pasada de medida desde dentro de la anterior y
+  la banda se quedaba con el alto de 1 px con el que nace. Se veía como si no existiera.
+- **El panel en gaming tiene cuatro esquinas macro** (G1–G4, 26 % × 19 %), como en
+  `usb-mouse-modos.html`. Van por encima de la banda: el pulgar las alcanza sin levantar la mano.
 - **La cabecera necesita el inset de la barra de estado.** El modo inmersivo solo esconde la de
   navegación; sin bajar el contenido, el LED, los glifos y el engranaje quedan tapados por el
   reloj. Se hace con `setOnApplyWindowInsetsListener` de plataforma, no con androidx.

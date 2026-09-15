@@ -124,6 +124,8 @@ class MainActivity : Activity(), DeckIO {
             Macro.FWD -> if (down) client.combo("a", "right")
             Macro.G1 -> client.keyHold("f13", down)
             Macro.G2 -> client.keyHold("f14", down)
+            Macro.G3 -> client.keyHold("f15", down)
+            Macro.G4 -> client.keyHold("f16", down)
         }
         if (down) { lastWire = 0; say(tag) }
     }
