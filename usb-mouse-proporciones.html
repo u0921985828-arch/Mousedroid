@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>USB Mouse · proporciones</title>
+<style>
+  :root{
+    --bg:#0f1114; --card:#171a1f; --line:#252a31;
+    --ink:#e0e5ea; --dim:#8b929b; --faint:#596069;
+    --accent:#9dc0f0; --warm:#e0b45a; --ok:#8fdc9a;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;
+    -webkit-text-size-adjust:100%}
+  .wrap{max-width:660px;margin:0 auto;padding:26px 16px 70px}
+  h1{font-size:24px;font-weight:600;margin:0 0 4px;letter-spacing:-.2px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 28px}
+  h2{font-size:16px;font-weight:600;margin:36px 0 6px}
+  .why{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+  .fig{background:#0c0e11;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  svg{display:block;width:100%;height:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0 0}
+  td{padding:7px 0;border-bottom:1px solid var(--line);color:var(--dim);vertical-align:top}
+  td:first-child{color:var(--ink);width:46%}
+  td:last-child{text-align:right;font-family:var(--mono);color:var(--accent);font-size:12.5px;white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .rule{border-left:3px solid var(--warm);background:#191611;padding:11px 14px;margin:14px 0;
+    font-size:13.5px;color:#d8caa9}
+  .rule b{color:#f1ddb0}
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Proporciones</h1>
+<p class="sub">Todas las medidas en dp. La unidad base es 4; nada usa un valor que no sea múltiplo suyo salvo los filos de 1 px.</p>
+
+<h2>El alcance del pulgar manda</h2>
+<p class="why">Sujetando el móvil con una mano, el pulgar barre un arco cuyo centro está en la esquina inferior. Todo lo que se pulsa a menudo cae dentro; lo que se toca una vez al mes puede vivir fuera. Esto es lo que decide de verdad la disposición, no la estética.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 340 300" role="img" aria-label="Zonas de alcance del pulgar sobre la pantalla en vertical">
+    <defs>
+      <clipPath id="scr"><rect x="70" y="10" width="200" height="280" rx="16"/></clipPath>
+    </defs>
+    <g clip-path="url(#scr)">
+      <rect x="70" y="10" width="200" height="280" fill="#12161a"/>
+      <circle cx="248" cy="286" r="150" fill="#8fdc9a" opacity=".13"/>
+      <circle cx="248" cy="286" r="205" fill="#e0b45a" opacity=".08"/>
+    </g>
+    <rect x="70" y="10" width="200" height="280" rx="16" fill="none" stroke="#2b323a" stroke-width="1.4"/>
+    <path d="M248 286 m-150 0 a150 150 0 0 1 150 -150" fill="none" stroke="#8fdc9a" stroke-width="1.2" opacity=".6"/>
+    <path d="M248 286 m-205 0 a205 205 0 0 1 205 -205" fill="none" stroke="#e0b45a" stroke-width="1.2" opacity=".5"/>
+    <text x="150" y="252" fill="#8fdc9a" font-size="11" font-family="system-ui">cómodo</text>
+    <text x="120" y="150" fill="#e0b45a" font-size="11" font-family="system-ui">estirando</text>
+    <text x="100" y="45" fill="#7e858e" font-size="11" font-family="system-ui">fuera</text>
+    <text x="14" y="42" fill="#8b929b" font-size="11" font-family="system-ui">cabecera:</text>
+    <text x="14" y="57" fill="#8b929b" font-size="11" font-family="system-ui">solo mirar</text>
+    <text x="8" y="252" fill="#8b929b" font-size="11" font-family="system-ui">clic: donde</text>
+    <text x="8" y="267" fill="#8b929b" font-size="11" font-family="system-ui">cae el pulgar</text>
+  </svg>
+</div>
+
+<div class="rule">
+  <b>Consecuencia:</b> la barra de clic va abajo y la cabecera arriba. Invertirlo obligaría a recolocar la mano en cada clic.
+</div>
+
+<h2>Panel premium · el modo por defecto</h2>
+<p class="why">Un trackpad de portátil de 14 pulgadas mide 130 × 80 mm: relación 1,62:1 apaisada. Respetarla deja deck vacío debajo, que es exactamente lo que hay en un portátil — el reposamuñecas — y lo que hace que se lea como hardware y no como una app a pantalla completa.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 400 420" role="img" aria-label="Plano acotado del modo panel premium">
+    <rect x="40" y="14" width="320" height="392" rx="18" fill="#191d22" stroke="#2b323a" stroke-width="1.4"/>
+
+    <circle cx="66" cy="44" r="4" fill="#8fdc9a"/>
+    <rect x="80" y="40" width="46" height="7" rx="3" fill="#2a3038"/>
+    <rect x="252" y="36" width="24" height="16" rx="5" fill="#242a31"/>
+    <rect x="282" y="36" width="26" height="16" rx="5" fill="#2e353e"/>
+    <circle cx="322" cy="44" r="3.4" fill="#8b929b"/><circle cx="332" cy="44" r="3.4" fill="#9dc0f0"/><circle cx="342" cy="44" r="3.4" fill="#3a4049"/>
+    <line x1="40" y1="64" x2="360" y2="64" stroke="#9dc0f0" stroke-width=".8" stroke-dasharray="3 4" opacity=".5"/>
+    <text x="368" y="48" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">30</text>
+
+    <rect x="58" y="120" width="266" height="164" rx="14" fill="#0e1216" stroke="#232a31"/>
+    <rect x="58" y="230" width="266" height="54" rx="0" fill="#141a20" opacity=".55"/>
+    <line x1="80" y1="230" x2="302" y2="230" stroke="#ffffff" stroke-width="1" opacity=".13"/>
+    <line x1="158" y1="240" x2="158" y2="274" stroke="#000" stroke-width="1.4" opacity=".5"/>
+    <line x1="224" y1="240" x2="224" y2="274" stroke="#000" stroke-width="1.4" opacity=".5"/>
+    <rect x="332" y="120" width="26" height="164" rx="12" fill="#0e1216" stroke="#232a31"/>
+    <rect x="343" y="190" width="4" height="24" rx="2" fill="#3a4149"/>
+
+    <line x1="58" y1="300" x2="324" y2="300" stroke="#9dc0f0" stroke-width=".9"/>
+    <path d="M58 296v8M324 296v8" stroke="#9dc0f0" stroke-width=".9"/>
+    <text x="191" y="316" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">ancho disponible</text>
+    <line x1="44" y1="120" x2="44" y2="284" stroke="#9dc0f0" stroke-width=".9"/>
+    <path d="M40 120h8M40 284h8" stroke="#9dc0f0" stroke-width=".9"/>
+    <text x="22" y="206" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace" transform="rotate(-90 22 206)">ancho ÷ 1,62</text>
+
+    <line x1="336" y1="230" x2="336" y2="284" stroke="#e0b45a" stroke-width=".9"/>
+    <path d="M332 230h8M332 284h8" stroke="#e0b45a" stroke-width=".9"/>
+    <text x="368" y="262" fill="#e0b45a" font-size="10.5" font-family="ui-monospace,monospace">32%</text>
+
+    <text x="191" y="205" text-anchor="middle" fill="#3f4650" font-size="11" font-family="system-ui">superficie de trabajo</text>
+    <text x="108" y="262" text-anchor="middle" fill="#565e68" font-size="10" font-family="system-ui">izq · 3</text>
+    <text x="191" y="262" text-anchor="middle" fill="#565e68" font-size="10" font-family="system-ui">med · 2</text>
+    <text x="273" y="262" text-anchor="middle" fill="#565e68" font-size="10" font-family="system-ui">der · 3</text>
+
+    <text x="191" y="352" text-anchor="middle" fill="#4b525b" font-size="11" font-family="system-ui">deck libre — reposamuñecas</text>
+    <text x="191" y="370" text-anchor="middle" fill="#3b424b" font-size="10.5" font-family="system-ui">no se toca, da sitio a la mano</text>
+  </svg>
+</div>
+
+<table>
+  <tr><td>Margen exterior</td><td>11</td></tr>
+  <tr><td>Cabecera</td><td>30</td></tr>
+  <tr><td>Hueco entre piezas</td><td>7</td></tr>
+  <tr><td>Relación del cristal</td><td>1,62 : 1</td></tr>
+  <tr><td>Radio del cristal</td><td>14</td></tr>
+  <tr><td>Banda de clic</td><td>32% del alto</td></tr>
+  <tr><td>Reparto de zonas</td><td>3 : 2 : 3</td></tr>
+  <tr><td>Raíl de scroll</td><td>36</td></tr>
+  <tr><td>Filo superior</td><td>1 px</td></tr>
+</table>
+
+<div class="rule">
+  <b>Mínimo intocable:</b> la banda al 32% sobre un cristal de 200 dp da 64 dp de alto. El umbral de un objetivo táctil es 48. Si la banda bajara de ahí, se quita antes que encogerla.
+</div>
+
+<h2>Ratón premium</h2>
+<p class="why">Un MX Master mide 125 mm de largo y sus botones cubren unos 55: el 44%. Ese es el número que hace que la silueta se lea como un ratón. Con botones al 20% parecen dos pestañas de una app.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 400 420" role="img" aria-label="Plano acotado del modo ratón premium">
+    <rect x="40" y="14" width="320" height="392" rx="18" fill="#191d22" stroke="#2b323a" stroke-width="1.4"/>
+    <circle cx="66" cy="44" r="4" fill="#8fdc9a"/>
+    <rect x="80" y="40" width="46" height="7" rx="3" fill="#2a3038"/>
+    <rect x="252" y="36" width="26" height="16" rx="5" fill="#2e353e"/>
+    <rect x="284" y="36" width="24" height="16" rx="5" fill="#242a31"/>
+    <circle cx="322" cy="44" r="3.4" fill="#8b929b"/><circle cx="332" cy="44" r="3.4" fill="#9dc0f0"/><circle cx="342" cy="44" r="3.4" fill="#3a4049"/>
+
+    <path d="M104 214 a74 74 0 0 1 148 0 v132 a12 12 0 0 1 -12 12 h-124 a12 12 0 0 1 -12 -12 z"
+          fill="#0f1317" stroke="#2a3139" stroke-width="1.2"/>
+    <path d="M104 214 a74 74 0 0 1 70 -73.8 V222 h-70 z" fill="#232931"/>
+    <path d="M252 214 a74 74 0 0 0 -70 -73.8 V222 h70 z" fill="#232931"/>
+    <rect x="171" y="142" width="14" height="80" rx="6" fill="#2b323b"/>
+    <g stroke="#ffffff" stroke-opacity=".16" stroke-width="1">
+      <path d="M174 162h8M174 170h8M174 178h8M174 186h8M174 194h8"/>
+    </g>
+    <line x1="104" y1="224" x2="252" y2="224" stroke="#000" stroke-width="1.2" opacity=".45"/>
+
+    <rect x="74" y="238" width="24" height="52" rx="8" fill="#232931"/>
+    <path d="M82 268 l4 -5 l4 5" fill="none" stroke="#7e858e" stroke-width="1.3" stroke-linecap="round"/>
+    <rect x="258" y="238" width="24" height="52" rx="8" fill="#232931"/>
+    <path d="M266 262 l4 5 l4 -5" fill="none" stroke="#7e858e" stroke-width="1.3" stroke-linecap="round"/>
+
+    <text x="178" y="292" text-anchor="middle" fill="#3f4650" font-size="11" font-family="system-ui">sensor</text>
+    <circle cx="164" cy="378" r="3.4" fill="#8b929b"/><circle cx="178" cy="378" r="3.4" fill="#9dc0f0"/><circle cx="192" cy="378" r="3.4" fill="#3a4049"/>
+
+    <line x1="290" y1="140" x2="290" y2="224" stroke="#e0b45a" stroke-width=".9"/>
+    <path d="M286 140h8M286 224h8" stroke="#e0b45a" stroke-width=".9"/>
+    <text x="298" y="186" fill="#e0b45a" font-size="10.5" font-family="ui-monospace,monospace">44%</text>
+    <line x1="308" y1="140" x2="308" y2="358" stroke="#9dc0f0" stroke-width=".9"/>
+    <path d="M304 140h8M304 358h8" stroke="#9dc0f0" stroke-width=".9"/>
+    <text x="316" y="252" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">1,85</text>
+    <line x1="104" y1="372" x2="252" y2="372" stroke="#9dc0f0" stroke-width=".9"/>
+    <path d="M104 368v8M252 368v8" stroke="#9dc0f0" stroke-width=".9"/>
+    <text x="178" y="396" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">1,00</text>
+  </svg>
+</div>
+
+<table>
+  <tr><td>Cuerpo, ancho : largo</td><td>1 : 1,85</td></tr>
+  <tr><td>Botones sobre el cuerpo</td><td>44%</td></tr>
+  <tr><td>Radio de la cabeza</td><td>46% del ancho</td></tr>
+  <tr><td>Radio de la cola</td><td>16</td></tr>
+  <tr><td>Ranura entre botones</td><td>2</td></tr>
+  <tr><td>Rueda</td><td>40 × 80, estrías cada 5</td></tr>
+  <tr><td>Rieles laterales</td><td>34</td></tr>
+  <tr><td>Escalones de sensibilidad</td><td>3 puntos de 7, paso 11</td></tr>
+</table>
+
+<div class="rule">
+  <b>Ojo con este modo:</b> por muy bien proporcionado que esté, el dedo que pulsa y el que desliza comparten zona. Es el modo bonito, no el cómodo.
+</div>
+
+<h2>Escala de las señales</h2>
+<p class="why">Sin texto en la superficie, el tamaño es lo único que jerarquiza. Tres escalones y ninguno más.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 400 130" role="img" aria-label="Tamaños del LED, los puntos y los glifos">
+    <circle cx="60" cy="52" r="3.5" fill="#8fdc9a"/>
+    <text x="60" y="84" text-anchor="middle" fill="#8b929b" font-size="11" font-family="system-ui">LED</text>
+    <text x="60" y="100" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">7</text>
+
+    <circle cx="150" cy="52" r="3.5" fill="#9dc0f0"/><circle cx="161" cy="52" r="3.5" fill="#3a4049"/><circle cx="172" cy="52" r="3.5" fill="#3a4049"/>
+    <text x="161" y="84" text-anchor="middle" fill="#8b929b" font-size="11" font-family="system-ui">escalones</text>
+    <text x="161" y="100" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">7 · paso 11</text>
+
+    <path d="M254 57 l6 -6 l6 6" fill="none" stroke="#8b929b" stroke-width="1.4" stroke-linecap="round"/>
+    <text x="260" y="84" text-anchor="middle" fill="#8b929b" font-size="11" font-family="system-ui">glifo</text>
+    <text x="260" y="100" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">11</text>
+
+    <circle cx="345" cy="52" r="13" fill="none" stroke="#8b929b" stroke-width="1.4"/>
+    <path d="M345 34v5M345 65v5M326 52h5M359 52h5" stroke="#8b929b" stroke-width="1.4" stroke-linecap="round"/>
+    <text x="345" y="84" text-anchor="middle" fill="#8b929b" font-size="11" font-family="system-ui">precisión</text>
+    <text x="345" y="100" text-anchor="middle" fill="#9dc0f0" font-size="10.5" font-family="ui-monospace,monospace">22</text>
+  </svg>
+</div>
+
+<div class="card">
+  <table>
+    <tr><td>Lector monoespaciado</td><td>10,5</td></tr>
+    <tr><td>Serigrafía secundaria</td><td>11,5</td></tr>
+    <tr><td>Serigrafía principal</td><td>12,5</td></tr>
+    <tr><td>Espaciado entre letras</td><td>0,03 em</td></tr>
+    <tr><td>Objetivo táctil mínimo</td><td>48</td></tr>
+  </table>
+</div>
+
+<h2>Lo que no cede</h2>
+<div class="card">
+  <p style="margin:0;font-size:13.5px;color:var(--dim)">Cuando la pantalla no da para todo, el orden de sacrificio es siempre el mismo: primero el deck libre, luego los escalones, luego la relación 1,62, luego la banda de clic. La superficie de trabajo no se toca nunca.</p>
+</div>
+
+<footer>
+  Medidas en dp, salvo los filos de 1 px que deben quedarse en un píxel físico a cualquier densidad.
+</footer>
+
+</div>
+</body>
+</html>

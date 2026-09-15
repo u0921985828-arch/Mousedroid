@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>USB Mouse · guía</title>
+<style>
+  :root{
+    --bg:#101215; --card:#191c21; --line:#262b32;
+    --ink:#dfe4ea; --dim:#8d949d; --faint:#5d646d;
+    --accent:#9dc0f0; --ok:#8fdc9a; --warn:#e0b45a;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.55;-webkit-text-size-adjust:100%}
+  .wrap{max-width:620px;margin:0 auto;padding:28px 18px 70px}
+
+  h1{font-size:25px;font-weight:600;margin:0 0 4px;letter-spacing:-.2px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+  h2{font-size:16px;font-weight:600;margin:38px 0 14px;display:flex;align-items:center;gap:10px}
+  .num{width:23px;height:23px;flex:none;border-radius:50%;background:var(--accent);color:#15181c;
+    font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:15px 16px;margin-bottom:11px}
+  .card p{margin:9px 0 0;font-size:14px;color:var(--dim)}
+  .card p:first-child{margin-top:0}
+  .card b{color:var(--ink);font-weight:600}
+  code{font-family:var(--mono);font-size:12.5px;background:#0d0f12;border:1px solid var(--line);
+    border-radius:5px;padding:2px 6px;color:var(--accent)}
+  .cmd{display:block;font-family:var(--mono);font-size:12.5px;background:#0d0f12;
+    border:1px solid var(--line);border-radius:7px;padding:10px 12px;color:var(--accent);
+    margin:10px 0 0;overflow-x:auto;white-space:nowrap}
+
+  svg{display:block;width:100%;height:auto}
+  .fig{background:#0f1215;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:11px}
+
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px}
+  .tile h3{font-size:13.5px;font-weight:600;margin:10px 0 3px}
+  .tile p{font-size:12.5px;color:var(--dim);margin:0}
+
+  .note{border-left:3px solid var(--warn);border-radius:0;background:#1a1712;
+    padding:12px 14px;margin:12px 0;font-size:13.5px;color:#d6c9a8}
+  .note b{color:#f0dcae}
+  .ok{border-left-color:var(--ok);background:#121a14;color:#b9d8bf}
+  .ok b{color:#d3ecd7}
+
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--faint)}
+  @media(max-width:460px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>USB Mouse</h1>
+<p class="sub">El móvil hace de ratón del PC por cable. Nada de Bluetooth, nada de red.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 560 130" role="img" aria-label="El móvil se conecta por cable al PC y mueve su cursor">
+    <rect x="18" y="22" width="62" height="96" rx="11" fill="#1b1f25" stroke="#39414b" stroke-width="1.4"/>
+    <rect x="25" y="33" width="48" height="74" rx="6" fill="#0f1418"/>
+    <circle cx="49" cy="70" r="13" fill="#9dc0f0" opacity=".16"/>
+    <circle cx="49" cy="70" r="4.5" fill="#9dc0f0"/>
+    <path d="M88 70 C140 70 150 70 190 70" stroke="#4d5865" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    <path d="M190 70 l-9 -5 v10 z" fill="#4d5865"/>
+    <text x="139" y="58" text-anchor="middle" fill="#6f7782" font-size="11" font-family="system-ui">cable USB</text>
+    <rect x="200" y="16" width="200" height="120" rx="9" fill="#1b1f25" stroke="#39414b" stroke-width="1.4"/>
+    <rect x="209" y="25" width="182" height="94" rx="5" fill="#0f1418"/>
+    <rect x="222" y="38" width="90" height="10" rx="3" fill="#232a31"/>
+    <rect x="222" y="55" width="120" height="7" rx="3" fill="#1d232a"/>
+    <rect x="222" y="68" width="100" height="7" rx="3" fill="#1d232a"/>
+    <path d="M336 78 l0 20 l5 -4.5 l3.4 7.6 l3.4 -1.4 l-3.4 -7.4 l7 0 z" fill="#f2f4f7"/>
+    <circle cx="430" cy="52" r="5" fill="#8fdc9a"/>
+    <text x="446" y="56" fill="#8d949d" font-size="12" font-family="system-ui">servidor</text>
+    <text x="446" y="76" fill="#5d646d" font-size="11" font-family="system-ui">en segundo plano</text>
+  </svg>
+</div>
+
+<h2><span class="num">1</span>Preparar el PC</h2>
+
+<div class="card">
+  <p><b>Una sola vez.</b> Abre la carpeta <code>server</code> y ejecuta los dos archivos en este orden.</p>
+  <span class="cmd">build-exe.bat</span>
+  <p>Genera <code>UsbMouse.exe</code>. Python hace falta solo aquí; después el PC no necesita nada instalado.</p>
+  <span class="cmd">install-autostart.bat</span>
+  <p>Deja el ejecutable arrancando con Windows, sin ventana. Para quitarlo, <code>uninstall-autostart.bat</code>.</p>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 560 96" role="img" aria-label="Primero se compila el ejecutable, luego se instala en el arranque">
+    <rect x="10" y="16" width="160" height="64" rx="9" fill="#181c21" stroke="#2b323a"/>
+    <text x="90" y="42" text-anchor="middle" fill="#9dc0f0" font-size="12" font-family="ui-monospace,monospace">build-exe.bat</text>
+    <text x="90" y="60" text-anchor="middle" fill="#6f7782" font-size="11" font-family="system-ui">compila</text>
+    <path d="M178 48 h32" stroke="#4d5865" stroke-width="2" stroke-linecap="round"/>
+    <path d="M212 48 l-8 -4.5 v9 z" fill="#4d5865"/>
+    <rect x="218" y="16" width="150" height="64" rx="9" fill="#181c21" stroke="#2b323a"/>
+    <text x="293" y="42" text-anchor="middle" fill="#9dc0f0" font-size="12" font-family="ui-monospace,monospace">UsbMouse.exe</text>
+    <text x="293" y="60" text-anchor="middle" fill="#6f7782" font-size="11" font-family="system-ui">portátil, ~10 MB</text>
+    <path d="M376 48 h32" stroke="#4d5865" stroke-width="2" stroke-linecap="round"/>
+    <path d="M410 48 l-8 -4.5 v9 z" fill="#4d5865"/>
+    <rect x="416" y="16" width="134" height="64" rx="9" fill="#141a15" stroke="#2c3a2f"/>
+    <circle cx="440" cy="48" r="5" fill="#8fdc9a"/>
+    <text x="456" y="45" fill="#b9d8bf" font-size="11.5" font-family="system-ui">arranca con</text>
+    <text x="456" y="60" fill="#b9d8bf" font-size="11.5" font-family="system-ui">Windows</text>
+  </svg>
+</div>
+
+<h2><span class="num">2</span>Preparar el móvil</h2>
+
+<div class="card">
+  <p><b>Instalar la app.</b> Abre la carpeta <code>android</code> en Android Studio y pulsa Run. También vale <code>gradlew installDebug</code>.</p>
+</div>
+
+<div class="card">
+  <p><b>Activar la depuración USB.</b> Ajustes → Opciones de desarrollador → Depuración USB. Al conectar el cable, acepta el diálogo y marca <b>Permitir siempre desde este equipo</b>.</p>
+</div>
+
+<div class="note">
+  <b>¿No quieres activar la depuración?</b> Usa anclaje USB: Ajustes → Conexión compartida → Anclaje USB, y marca <b>Abrir al enchufar</b> dentro de la app. Sigue yendo todo por el cable.
+</div>
+
+<h2><span class="num">3</span>Usar</h2>
+
+<div class="card">
+  <p><b>Enchufa el cable. Nada más.</b> El servidor detecta el móvil, monta el túnel, enciende la pantalla y abre la app sola. El punto de la cabecera te dice en qué estado está.</p>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 560 62" role="img" aria-label="Verde conectado, ámbar buscando, gris parado">
+    <circle cx="30" cy="31" r="7" fill="#8fdc9a"/>
+    <text x="48" y="28" fill="#dfe4ea" font-size="13" font-family="system-ui">Verde</text>
+    <text x="48" y="45" fill="#8d949d" font-size="11.5" font-family="system-ui">conectado, ya mueves el cursor</text>
+    <circle cx="240" cy="31" r="7" fill="#e0b45a"/>
+    <text x="258" y="28" fill="#dfe4ea" font-size="13" font-family="system-ui">Ámbar</text>
+    <text x="258" y="45" fill="#8d949d" font-size="11.5" font-family="system-ui">buscando el PC</text>
+    <circle cx="430" cy="31" r="7" fill="#5d646d"/>
+    <text x="448" y="28" fill="#dfe4ea" font-size="13" font-family="system-ui">Gris</text>
+    <text x="448" y="45" fill="#8d949d" font-size="11.5" font-family="system-ui">parado</text>
+  </svg>
+</div>
+
+<h2><span class="num">4</span>Gestos</h2>
+
+<div class="grid">
+
+  <div class="tile">
+    <svg viewBox="0 0 200 104" role="img" aria-label="Un dedo arrastrando mueve el cursor">
+      <rect x="8" y="8" width="184" height="88" rx="12" fill="#14181c" stroke="#262b32"/>
+      <circle cx="62" cy="52" r="13" fill="#9dc0f0" opacity=".2"/>
+      <circle cx="62" cy="52" r="5" fill="#9dc0f0"/>
+      <path d="M80 52 h56" stroke="#9dc0f0" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 5"/>
+      <path d="M144 52 l-9 -5 v10 z" fill="#9dc0f0"/>
+    </svg>
+    <h3>Mover</h3>
+    <p>Un dedo arrastrando.</p>
+  </div>
+
+  <div class="tile">
+    <svg viewBox="0 0 200 104" role="img" aria-label="Un toque corto es clic izquierdo">
+      <rect x="8" y="8" width="184" height="88" rx="12" fill="#14181c" stroke="#262b32"/>
+      <circle cx="100" cy="52" r="21" fill="none" stroke="#9dc0f0" stroke-width="1.4" opacity=".45"/>
+      <circle cx="100" cy="52" r="13" fill="#9dc0f0" opacity=".2"/>
+      <circle cx="100" cy="52" r="5" fill="#9dc0f0"/>
+    </svg>
+    <h3>Clic izquierdo</h3>
+    <p>Un toque corto.</p>
+  </div>
+
+  <div class="tile">
+    <svg viewBox="0 0 200 104" role="img" aria-label="Un toque con dos dedos es clic derecho">
+      <rect x="8" y="8" width="184" height="88" rx="12" fill="#14181c" stroke="#262b32"/>
+      <circle cx="80" cy="52" r="13" fill="#9dc0f0" opacity=".2"/>
+      <circle cx="80" cy="52" r="5" fill="#9dc0f0"/>
+      <circle cx="120" cy="52" r="13" fill="#9dc0f0" opacity=".2"/>
+      <circle cx="120" cy="52" r="5" fill="#9dc0f0"/>
+    </svg>
+    <h3>Clic derecho</h3>
+    <p>Un toque con dos dedos.</p>
+  </div>
+
+  <div class="tile">
+    <svg viewBox="0 0 200 104" role="img" aria-label="Dos dedos arrastrando desplazan la página">
+      <rect x="8" y="8" width="184" height="88" rx="12" fill="#14181c" stroke="#262b32"/>
+      <circle cx="82" cy="40" r="11" fill="#9dc0f0" opacity=".2"/>
+      <circle cx="82" cy="40" r="4.5" fill="#9dc0f0"/>
+      <circle cx="118" cy="40" r="11" fill="#9dc0f0" opacity=".2"/>
+      <circle cx="118" cy="40" r="4.5" fill="#9dc0f0"/>
+      <path d="M100 58 v20" stroke="#9dc0f0" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 5"/>
+      <path d="M100 84 l-5 -9 h10 z" fill="#9dc0f0"/>
+    </svg>
+    <h3>Desplazar</h3>
+    <p>Dos dedos arrastrando.</p>
+  </div>
+
+  <div class="tile">
+    <svg viewBox="0 0 200 104" role="img" aria-label="Mantener pulsado engancha el arrastre">
+      <rect x="8" y="8" width="184" height="88" rx="12" fill="#9dc0f0" fill-opacity=".05" stroke="#9dc0f0" stroke-opacity=".5"/>
+      <circle cx="70" cy="52" r="15" fill="#9dc0f0" opacity=".25"/>
+      <circle cx="70" cy="52" r="5" fill="#9dc0f0"/>
+      <path d="M70 34 a18 18 0 1 1 -12 5" stroke="#9dc0f0" stroke-width="1.6" fill="none" opacity=".55"/>
+      <path d="M90 52 h44" stroke="#9dc0f0" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 5"/>
+      <path d="M142 52 l-9 -5 v10 z" fill="#9dc0f0"/>
+    </svg>
+    <h3>Arrastrar</h3>
+    <p>Mantén pulsado y mueve. El borde se ilumina.</p>
+  </div>
+
+  <div class="tile">
+    <svg viewBox="0 0 200 104" role="img" aria-label="La franja inferior se divide en tres zonas de clic">
+      <rect x="8" y="8" width="184" height="52" rx="11" fill="#14181c" stroke="#262b32"/>
+      <rect x="8" y="66" width="184" height="30" rx="9" fill="#1e2228" stroke="#2b313a"/>
+      <path d="M77 72 v18 M123 72 v18" stroke="#0c0e11" stroke-width="2"/>
+      <circle cx="43" cy="81" r="3.6" fill="#8d949d"/>
+      <circle cx="100" cy="81" r="3.6" fill="#8d949d"/>
+      <circle cx="157" cy="81" r="3.6" fill="#8d949d"/>
+    </svg>
+    <h3>Franja de clic</h3>
+    <p>Izquierdo, medio y derecho. Se pueden dejar pulsados.</p>
+  </div>
+
+</div>
+
+<h2><span class="num">5</span>Modos</h2>
+
+<div class="card">
+  <p>En la cabecera: el icono elige <b>ratón</b> o <b>panel</b>, y los tres puntos suben de nivel — básico, premium, gaming. Viene en <b>panel premium</b>, que es el que menos exige a la mano y el que mejor escala.</p>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 560 150" role="img" aria-label="Disposición del modo ratón frente al modo panel">
+    <text x="118" y="18" text-anchor="middle" fill="#8d949d" font-size="12" font-family="system-ui">ratón</text>
+    <rect x="46" y="28" width="144" height="112" rx="10" fill="#14181c" stroke="#262b32"/>
+    <rect x="54" y="36" width="58" height="26" rx="6" fill="#232830"/>
+    <rect x="116" y="36" width="10" height="26" rx="4" fill="#2c323b"/>
+    <rect x="130" y="36" width="52" height="26" rx="6" fill="#232830"/>
+    <rect x="54" y="68" width="128" height="64" rx="8" fill="#0f1418" stroke="#232830"/>
+
+    <text x="442" y="18" text-anchor="middle" fill="#9dc0f0" font-size="12" font-family="system-ui">panel · por defecto</text>
+    <rect x="370" y="28" width="144" height="112" rx="10" fill="#14181c" stroke="#9dc0f0" stroke-opacity=".4"/>
+    <rect x="378" y="36" width="116" height="74" rx="8" fill="#0f1418" stroke="#232830"/>
+    <rect x="498" y="36" width="8" height="74" rx="4" fill="#232830"/>
+    <rect x="378" y="116" width="128" height="18" rx="6" fill="#1e2228"/>
+    <path d="M420 119 v12 M462 119 v12" stroke="#0c0e11" stroke-width="1.6"/>
+  </svg>
+</div>
+
+<h2><span class="num">6</span>Si algo falla</h2>
+
+<div class="card">
+  <p><b>El punto sigue ámbar.</b> El PC no responde. Mira <code>server\usbmouse.log</code>: si dice que el móvil sale como <i>unauthorized</i>, vuelve a aceptar el diálogo de depuración en el móvil.</p>
+</div>
+
+<div class="card">
+  <p><b>El cursor va a tirones.</b> Casi siempre es ahorro de energía capando el proceso. Quita la app de la optimización de batería en Ajustes → Batería.</p>
+</div>
+
+<div class="card">
+  <p><b>El cursor va muy rápido o muy lento.</b> Los tres puntos de ajustes, control de sensibilidad. En gaming la aceleración está apagada a propósito.</p>
+</div>
+
+<div class="note ok">
+  <b>Comprobación rápida:</b> arranca el servidor a mano con <code>server\start.bat -v</code>. Verás cada comando según llega y sabrás al momento si el problema está en el enlace o en el PC.
+</div>
+
+<footer>
+  La app no envía nada por internet. El tráfico va del móvil al cable y del cable a tu PC.
+</footer>
+
+</div>
+</body>
+</html>

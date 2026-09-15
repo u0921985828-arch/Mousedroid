@@ -1,0 +1,14 @@
+# Python (servidor)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# PyInstaller
+server/build/
+server/dist/
+server/*.spec
+
+# Sistema
+.DS_Store
+Thumbs.db
