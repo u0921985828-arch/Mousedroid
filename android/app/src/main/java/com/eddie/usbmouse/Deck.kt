@@ -76,6 +76,25 @@ class GlyphView(context: Context, private val kind: String) : View(context) {
                 canvas.drawLine(cx - w, cy + h * 0.45f, cx + w, cy + h * 0.45f, p)
                 p.alpha = a
             }
+            "keys" -> {
+                val w = 10f * d
+                val h = 7f * d
+                canvas.drawRoundRect(RectF(cx - w, cy - h, cx + w, cy + h), 2f * d, 2f * d, p)
+                val a = p.alpha
+                p.alpha = 150
+                // dos filas de teclas y la barra espaciadora
+                var y = cy - h * 0.36f
+                repeat(2) {
+                    var x = cx - w * 0.55f
+                    repeat(3) {
+                        canvas.drawPoint(x, y, p)
+                        x += w * 0.55f
+                    }
+                    y += h * 0.4f
+                }
+                canvas.drawLine(cx - w * 0.45f, cy + h * 0.52f, cx + w * 0.45f, cy + h * 0.52f, p)
+                p.alpha = a
+            }
         }
     }
 }
@@ -113,8 +132,24 @@ interface DeckIO {
     fun click(b: Char)
     fun button(b: Char, down: Boolean)
     fun macro(tag: String, down: Boolean)
+    fun text(s: String)
+    fun key(name: String)
+    fun combo(mods: String, name: String)
     fun haptic()
     fun note(s: String)
+}
+
+/**
+ * Etiquetas de los botones que no son de raton. Son constantes y no literales
+ * sueltos porque [Deck] las pinta en el lector y [MainActivity] las traduce a
+ * teclas: una tilde de menos en un sitio y el boton deja de hacer nada.
+ */
+object Macro {
+    const val BACK = "atrás"
+    const val FWD = "adelante"
+    const val G1 = "G1"
+    const val G2 = "G2"
+    const val SNIPER = "sniper"
 }
 
 /**
@@ -130,13 +165,27 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
 
     lateinit var pad: TouchpadView
         private set
-    private var pips: PipsView? = null
     private var stage = 0
     private var sniper = false
+    private var halo: HaloView? = null
 
     var baseSens = 1.8f
+    /** Lo que ha pedido el usuario. Gaming lo apaga aunque este puesto. */
     var accel = true
     var natural = false
+
+    /**
+     * Un solo objeto para toda la ruta caliente, creado con el Deck y no por
+     * pantalla: asi un evento de dedo no asigna nada. El halo se resuelve al
+     * vuelo porque [PadStack] lo crea despues que el pad.
+     */
+    private val sink = object : PadSink {
+        override fun move(dx: Float, dy: Float) = io.move(dx, dy)
+        override fun scroll(dx: Float, dy: Float) = io.scroll(dx, dy)
+        override fun point(x: Float, y: Float, visible: Boolean) {
+            halo?.show(x, y, visible)
+        }
+    }
 
     private fun dp(v: Float) = dpOf(ctx, v)
 
@@ -159,7 +208,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                     if (code != null) { if (hold) io.button(code, true) else io.click(code) }
                     if (tag != null) {
                         io.macro(tag, true)
-                        if (tag == "sniper") { sniper = true; applySens() }
+                        if (tag == Macro.SNIPER) { sniper = true; applySens() }
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -167,7 +216,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                     if (code != null && hold) io.button(code, false)
                     if (tag != null) {
                         io.macro(tag, false)
-                        if (tag == "sniper") { sniper = false; applySens() }
+                        if (tag == Macro.SNIPER) { sniper = false; applySens() }
                     }
                 }
             }
@@ -188,7 +237,6 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                 io.note("Nivel ${stage + 1}")
             }
         }
-        pips = p
         return p
     }
 
@@ -201,11 +249,10 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
         private var band: View? = null
 
         init {
-            val halo = HaloView(ctx)
-            val p = padRef
-            p.onTouchPoint = { x, y, visible -> halo.show(x, y, visible) }
-            addView(p, LayoutParams(MATCH_PARENT, MATCH_PARENT))
-            addView(halo, LayoutParams(halo.size, halo.size))
+            val h = HaloView(ctx)
+            halo = h
+            addView(padRef, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(h, LayoutParams(h.size, h.size))
             if (withBand) {
                 val b = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
                 b.addView(key(true, 'l', null), LinearLayout.LayoutParams(0, MATCH_PARENT, 3f))
@@ -251,9 +298,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             naturalScroll = natural
             tapToClick = tap
             twoFingerScroll = twoFinger
-            showHint = false
-            onMove = { dx, dy -> io.move(dx, dy) }
-            onScroll = { dx, dy -> io.scroll(dx, dy) }
+            sink = this@Deck.sink
             onClick = { b -> io.click(b) }
             onButton = { b, down -> io.button(b, down) }
             onHaptic = { io.haptic() }
@@ -277,7 +322,8 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
 
     fun build(family: Int, tier: Int): View {
         val root = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        accel = tier != 2
+        // Gaming apaga la aceleracion a proposito, este como este en los ajustes.
+        val usaAccel = accel && tier != 2
 
         if (family == 0) {
             // --------- raton: botones arriba, rueda al medio, sensor debajo
@@ -299,7 +345,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             if (tier >= 1) body.addView(sideRail(tier, true), LinearLayout.LayoutParams(dp(34f), MATCH_PARENT).apply {
                 rightMargin = dp(7f)
             })
-            body.addView(newPadStack(tap = tier == 0, twoFinger = tier == 0, accelHere = accel),
+            body.addView(newPadStack(tap = tier == 0, twoFinger = tier == 0, accelHere = usaAccel),
                 LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
             if (tier >= 1) body.addView(sideRail(tier, false), LinearLayout.LayoutParams(dp(34f), MATCH_PARENT).apply {
                 leftMargin = dp(7f)
@@ -309,7 +355,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             if (tier >= 1) root.addView(pipsRow(if (tier == 2) Monet.accentSoft else Monet.accent),
                 LinearLayout.LayoutParams(MATCH_PARENT, dp(24f)).apply { topMargin = dp(6f) })
 
-            if (tier == 2) root.addView(key(false, null, "sniper", "cross"),
+            if (tier == 2) root.addView(key(false, null, Macro.SNIPER, "cross"),
                 LinearLayout.LayoutParams(MATCH_PARENT, 0, if (short()) 9f else 12f).apply {
                     topMargin = dp(7f)
                 })
@@ -324,7 +370,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             // ahi manda la usabilidad y el cristal se estira
             val ratio = if (short()) 0f else 1.62f
             body.addView(
-                newPadStack(tap = true, twoFinger = true, accelHere = accel,
+                newPadStack(tap = true, twoFinger = true, accelHere = usaAccel,
                     aspect = ratio, band = tier >= 1),
                 LinearLayout.LayoutParams(0, MATCH_PARENT, 1f)
             )
@@ -343,12 +389,12 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
     private fun sideRail(tier: Int, leftSide: Boolean): View {
         val c = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         c.addView(
-            key(false, null, if (leftSide) "atrás" else "adelante", if (leftSide) "up" else "down"),
+            key(false, null, if (leftSide) Macro.BACK else Macro.FWD, if (leftSide) "up" else "down"),
             LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f)
         )
         if (tier == 2) {
             c.addView(
-                key(false, null, if (leftSide) "G1" else "G2", if (leftSide) "dot1" else "dot2"),
+                key(false, null, if (leftSide) Macro.G1 else Macro.G2, if (leftSide) "dot1" else "dot2"),
                 LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = dp(7f) }
             )
         }

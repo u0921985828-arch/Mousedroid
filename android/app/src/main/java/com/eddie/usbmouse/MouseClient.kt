@@ -88,8 +88,10 @@ class MouseClient(private val onStatus: (String) -> Unit) {
         }
     }
 
+    // UTF-8 y no ASCII: el texto de K lleva eñes y signos de apertura. Para todo
+    // lo demas son los mismos bytes, asi que el servidor antiguo no nota nada.
     private fun write(s: String) {
-        out?.write(s.toByteArray(Charsets.US_ASCII))
+        out?.write(s.toByteArray(Charsets.UTF_8))
     }
 
     // Buffer reutilizado: emitir un movimiento no asigna nada, asi no alimentamos
@@ -150,6 +152,25 @@ class MouseClient(private val onStatus: (String) -> Unit) {
     fun click(b: Char) = urgent.offer("C$b\n")
 
     fun button(b: Char, down: Boolean) = urgent.offer("${if (down) "D" else "U"}$b\n")
+
+    // ---------------------------------------------------------------- teclado
+    // Todo esto va por la cola urgente: son acciones discretas, no ruta caliente.
+    // Un salto de linea partiria el comando en dos, asi que aqui no entra: el
+    // Enter viaja como tecla, no como texto.
+
+    fun text(s: String) {
+        if (s.isEmpty()) return
+        val clean = s.replace('\n', ' ').replace("\r", "")
+        if (clean.isNotEmpty()) urgent.offer("K$clean\n")
+    }
+
+    fun key(name: String) = urgent.offer("E$name\n")
+
+    fun keyHold(name: String, down: Boolean) =
+        urgent.offer("E${if (down) "+" else "-"}$name\n")
+
+    /** mods: letras de c(ctrl) a(alt) s(shift) w(win). */
+    fun combo(mods: String, name: String) = urgent.offer("H$mods,$name\n")
 
     fun close() {
         if (connected.getAndSet(false)) onStatus("Desconectado")

@@ -27,7 +27,8 @@ Para quitarlo: `uninstall-autostart.bat`. Si prefieres no compilar, `install-aut
 cae de vuelta a Python automáticamente.
 
 **Móvil:**
-1. Abre `android/` en Android Studio → Run (o `gradlew installDebug`).
+1. Abre `android/` en Android Studio → Run (o `cd android && ./gradlew installDebug`,
+   `gradlew.bat` en Windows: el wrapper se baja Gradle 8.7 solo la primera vez).
 2. Vía ADB: activa **Depuración USB** y marca "Permitir siempre desde este equipo".
    Vía anclaje: Ajustes → Conexión compartida → **Anclaje USB**, y marca "Abrir al enchufar" en la app.
 
@@ -46,8 +47,15 @@ todo se rehace solo.
 
 Para pruebas manuales con ventana y logs: `server\start.bat -v`.
 
+Si el móvil no tiene la app instalada, el servidor la instala él: busca `UsbMouse.apk` a su
+lado y, si no está, el APK que deja `./gradlew assembleDebug`.
+
+En Windows aparece además un **icono en la bandeja**: gris esperando, ámbar con el móvil
+enchufado y verde con la app conectada. Doble clic abre el registro, botón derecho da el menú.
+No necesita nada instalado, va con `ctypes`; en otros sistemas simplemente no sale.
+
 Opciones: `--port 9000`, `--adb C:\platform-tools\adb.exe`, `--no-launch`,
-`--no-wake`, `--no-auto`, `--lan`, `--log`, `-v`.
+`--no-wake`, `--no-auto`, `--no-install`, `--no-tray`, `--lan`, `--log`, `-v`.
 
 ---
 
@@ -62,8 +70,9 @@ Modo inmersivo: las barras del sistema se ocultan.
 A la derecha del LED corre un lector monoespaciado con el último comando enviado
 (`M 12.4,-3.1`, `C l`), útil para depurar sin abrir logcat.
 
-`usb-mouse-prototipo.html` es un prototipo funcional de esa interfaz en el navegador,
-con un escritorio simulado para probar la sensación sin compilar nada.
+`usb-mouse-modos.html` es un prototipo funcional de esa interfaz en el navegador, con un
+escritorio simulado para probar la sensación sin compilar nada. `usb-mouse-proporciones.html`
+tiene las cotas y `usb-mouse-guia.html` la guía de uso.
 
 ## Gestos
 
@@ -77,6 +86,12 @@ con un escritorio simulado para probar la sensación sin compilar nada.
 | mantener pulsado y mover | arrastrar (botón izq. retenido) |
 | doble toque + mover | arrastrar |
 | franja lateral derecha | scroll con un dedo |
+
+En la cabecera hay un glifo de teclado: abre el teclado del sistema y lo que escribas va al PC,
+tildes y eñes incluidas. Debajo quedan las teclas que un móvil no da — `esc`, tabulador,
+flechas, retroceso e intro (las que se repiten si las mantienes) — y copiar / pegar / deshacer.
+En modo ratón, los botones laterales mandan Alt+← y Alt+→ (atrás y adelante), y en gaming
+G1 y G2 mandan F13 y F14, que son teclas que ningún programa usa por su cuenta.
 
 Abajo: botones izquierdo / medio / derecho, sensibilidad (0.5–6.5), aceleración,
 scroll natural, **conectar sola** y **abrir al enchufar**. Todo se guarda en `SharedPreferences`.
@@ -102,11 +117,12 @@ así que un cargador de pared no la abre.
 
 ## Detalles técnicos
 
-- **Protocolo**: líneas ASCII, `M dx,dy` / `S dx,dy` / `C b` / `D b` / `U b` / `P`. Trivial de extender.
+- **Protocolo**: líneas UTF-8, `M dx,dy` / `S dx,dy` / `C b` / `D b` / `U b` / `K texto` / `E tecla` / `H mods,tecla` / `P`. Trivial de extender.
 - **Latencia**: `TCP_NODELAY` activo; los movimientos se acumulan y se envían a ~120 Hz (8 ms) para no saturar el socket. Los clicks salen por una cola aparte, sin esperar.
 - **Restos fraccionarios**: tanto la app como el servidor acumulan decimales, así que los movimientos finos no se pierden.
 - **Descubrimiento**: la app manda `USBMOUSE?` por UDP 8778 a broadcast y el PC responde con su IP y puerto. Cero configuración.
-- **Seguridad**: si se corta la conexión con un botón pulsado, el servidor lo suelta (`release_all`).
+- **Seguridad**: si se corta la conexión con un botón o una tecla pulsados, el servidor los suelta (`release_all`).
+- **Teclado**: la app no dibuja letras; usa el teclado del sistema y envuelve la `InputConnection` para capturar lo que escribes, que es lo único que funciona igual en todos los teclados.
 - El servidor escucha solo en `127.0.0.1` salvo que uses `--lan`.
 
 ### Por qué hace falta algo en el PC
@@ -127,8 +143,6 @@ portátil de un solo archivo: es la huella más pequeña posible por USB.
 
 ### Ideas para ampliar
 
-- Teclado: añadir `K<texto>` al protocolo y `pynput.keyboard` en el servidor.
 - Multimedia: `pynput` puede mandar play/pause/volumen.
 - Giroscopio como modo puntero (tipo mando Wii).
-- Instalar el APK solo: `adb shell pm list packages` en el watcher y `adb install -r` si falta.
-- Icono en la bandeja del sistema en el PC (pystray) para ver el estado.
+- Un opcode que acepte una secuencia entera de teclas, para macros largas.

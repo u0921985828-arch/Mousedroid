@@ -15,19 +15,32 @@ import kotlin.math.hypot
 import kotlin.math.min
 
 /**
+ * Salida de la ruta caliente. Es una interfaz y no un `(Float, Float) -> Unit`
+ * a proposito: un tipo funcion de Kotlin es un `Function2<Float, Float, Unit>`,
+ * o sea generico, asi que cada llamada mete los dos Float en objetos. Y Float no
+ * tiene cache como Integer, de modo que son dos asignaciones por evento de dedo.
+ * Con una interfaz de parametros primitivos no se asigna nada.
+ */
+interface PadSink {
+    fun move(dx: Float, dy: Float)
+    fun scroll(dx: Float, dy: Float)
+    /** Punto bajo el dedo. Lo consume el halo; no redibuja el cristal. */
+    fun point(x: Float, y: Float, visible: Boolean)
+}
+
+/**
  * Cristal hundido. Ruta caliente: aqui NO se hace ninguna asignacion ni
  * `Color.parseColor` por fotograma, y el dedo no provoca invalidaciones de esta
  * vista — el halo vive en [HaloView], que se mueve con translationX/Y.
  */
 class TouchpadView(context: Context) : View(context) {
 
-    var onMove: ((Float, Float) -> Unit)? = null
-    var onScroll: ((Float, Float) -> Unit)? = null
+    /** Movimiento, scroll y posicion: todo lo que se dispara por evento tactil. */
+    var sink: PadSink? = null
+    // Estos tres son acciones sueltas, no ruta caliente: una lambda esta bien.
     var onClick: ((Char) -> Unit)? = null
     var onButton: ((Char, Boolean) -> Unit)? = null
     var onHaptic: (() -> Unit)? = null
-    /** x, y, visible. Lo consume el halo; no redibuja el cristal. */
-    var onTouchPoint: ((Float, Float, Boolean) -> Unit)? = null
 
     var sensitivity = 1.8f
     var acceleration = true
@@ -142,9 +155,9 @@ class TouchpadView(context: Context) : View(context) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE ->
-                onTouchPoint?.invoke(e.x, e.y, true)
+                sink?.point(e.x, e.y, true)
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                onTouchPoint?.invoke(e.x, e.y, false)
+                sink?.point(e.x, e.y, false)
         }
 
         when (e.actionMasked) {
@@ -194,7 +207,7 @@ class TouchpadView(context: Context) : View(context) {
                         accX -= nx * scrollStep
                         accY -= ny * scrollStep
                         val sign = if (naturalScroll) 1f else -1f
-                        onScroll?.invoke(sign * nx.toFloat(), sign * ny.toFloat())
+                        sink?.scroll(sign * nx.toFloat(), sign * ny.toFloat())
                         moved = true
                     }
                 } else {
@@ -208,7 +221,7 @@ class TouchpadView(context: Context) : View(context) {
                     if (moved || dragging) {
                         val dist = hypot(dx, dy)
                         val f = sensitivity * if (acceleration) 1f + min(dist / 9f, 2.2f) else 1f
-                        if (abs(dx) > 0.01f || abs(dy) > 0.01f) onMove?.invoke(dx * f, dy * f)
+                        if (abs(dx) > 0.01f || abs(dy) > 0.01f) sink?.move(dx * f, dy * f)
                     }
                 }
             }
@@ -317,14 +330,8 @@ class ScrollStripView(context: Context, private val wheel: Boolean = false) : Vi
         invalidate()
     }
 
-    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-        super.onMeasure(widthSpec, heightSpec)
-        if (aspect > 0f) {
-            val w = measuredWidth
-            val h = (w / aspect).toInt().coerceAtMost(measuredHeight)
-            setMeasuredDimension(w, h)
-        }
-    }
+    // Sin onMeasure propio: el rail no tiene relacion fija, [Deck] le da ancho en dp
+    // y alto MATCH_PARENT. Lo de la relacion 1,62 es cosa del cristal.
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)

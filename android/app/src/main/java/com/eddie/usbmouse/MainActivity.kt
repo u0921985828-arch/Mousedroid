@@ -41,6 +41,7 @@ class MainActivity : Activity(), DeckIO {
 
     private lateinit var client: MouseClient
     private lateinit var deck: Deck
+    private lateinit var keys: KeyDeck
     private lateinit var led: View
     private lateinit var wire: TextView
     private lateinit var stageHost: FrameLayout
@@ -49,6 +50,7 @@ class MainActivity : Activity(), DeckIO {
     private lateinit var portIn: EditText
     private lateinit var famMouse: GlyphView
     private lateinit var famPad: GlyphView
+    private lateinit var keyGlyph: GlyphView
     private lateinit var tierPips: PipsView
     private var vib: Vibrator? = null
 
@@ -76,6 +78,7 @@ class MainActivity : Activity(), DeckIO {
 
         client = MouseClient { msg -> runOnUiThread { onStatus(msg) } }
         deck = Deck(this, this)
+        keys = KeyDeck(this, this)
         setContentView(buildChassis())
         rebuild()
     }
@@ -108,7 +111,30 @@ class MainActivity : Activity(), DeckIO {
         client.button(b, down); lastWire = 0; say("${if (down) "D" else "U"} $b")
     }
 
-    override fun macro(tag: String, down: Boolean) { if (down) { lastWire = 0; say(tag) } }
+    /**
+     * Los botones que no son de raton se traducen aqui a teclas de verdad.
+     * `sniper` no aparece: ese actua en local bajando la sensibilidad, no viaja.
+     * G1 y G2 mandan F13/F14, que son las teclas que ningun programa usa por su
+     * cuenta y que por eso se dejan para asignar en el juego.
+     */
+    override fun macro(tag: String, down: Boolean) {
+        when (tag) {
+            Macro.BACK -> if (down) client.combo("a", "left")
+            Macro.FWD -> if (down) client.combo("a", "right")
+            Macro.G1 -> client.keyHold("f13", down)
+            Macro.G2 -> client.keyHold("f14", down)
+        }
+        if (down) { lastWire = 0; say(tag) }
+    }
+
+    // El lector no repite lo escrito: lo que se teclea puede ser una contraseña.
+    override fun text(s: String) { client.text(s); lastWire = 0; say("K·") }
+
+    override fun key(name: String) { client.key(name); lastWire = 0; say(name) }
+
+    override fun combo(mods: String, name: String) {
+        client.combo(mods, name); lastWire = 0; say("$mods+$name")
+    }
 
     override fun haptic() {
         val v = vib ?: return
@@ -132,6 +158,9 @@ class MainActivity : Activity(), DeckIO {
             shape = GradientDrawable.OVAL
             setColor(col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF))
         }
+        // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
+        // cambios de conexion son raros, asi que se saltan la espera del lector.
+        if (msg.isNotEmpty()) { lastWire = 0; say(msg) }
     }
 
     // ------------------------------------------------------------ chasis
@@ -157,6 +186,11 @@ class MainActivity : Activity(), DeckIO {
             topMargin = dp(9)
         })
         root.addView(colv, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // el teclado va antes que los ajustes: si por lo que sea coinciden, manda
+        // el panel de ajustes, que es el que tiene el boton de aplicar
+        root.addView(keys.build(), FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+            gravity = Gravity.BOTTOM
+        })
         root.addView(settingsPanel(), FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             gravity = Gravity.BOTTOM
         })
@@ -188,6 +222,12 @@ class MainActivity : Activity(), DeckIO {
         bar.addView(famMouse, LinearLayout.LayoutParams(dp(30), dp(26)))
         bar.addView(famPad, LinearLayout.LayoutParams(dp(32), dp(26)).apply { leftMargin = dp(2) })
 
+        keyGlyph = GlyphView(this, "keys").apply {
+            alpha = 0.38f
+            setOnClickListener { toggleKeys() }
+        }
+        bar.addView(keyGlyph, LinearLayout.LayoutParams(dp(32), dp(26)).apply { leftMargin = dp(6) })
+
         tierPips = PipsView(this).apply {
             active = tier
             setOnClickListener { tier = (tier + 1) % 3; haptic(); rebuild() }
@@ -196,7 +236,7 @@ class MainActivity : Activity(), DeckIO {
 
         val gear = etched("·  ·  ·", 12f, Monet.etchDim).apply {
             setPadding(dp(10), dp(5), dp(6), dp(5))
-            setOnClickListener { togglePanel() }
+            setOnClickListener { haptic(); togglePanel() }
         }
         bar.addView(gear)
         return bar
@@ -206,6 +246,9 @@ class MainActivity : Activity(), DeckIO {
         prefs.edit().putInt("family", family).putInt("tier", tier).apply()
         deck.baseSens = prefs.getFloat("sens", 1.8f)
         deck.natural = prefs.getBoolean("natural", false)
+        // faltaba, y por eso apagar la aceleracion duraba hasta el siguiente
+        // cambio de modo: al reconstruir se creaba un pad nuevo con el valor viejo
+        deck.accel = prefs.getBoolean("accel", true)
         stageHost.removeAllViews()
         stageHost.addView(deck.build(family, tier),
             FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -284,7 +327,9 @@ class MainActivity : Activity(), DeckIO {
         val b = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         a.addView(check("Aceleración", prefs.getBoolean("accel", true)) {
             prefs.edit().putBoolean("accel", it).apply()
-            deck.pad.acceleration = it
+            deck.accel = it
+            // en gaming manda el modo: ahi la aceleracion esta apagada a proposito
+            if (tier != 2) deck.pad.acceleration = it
         })
         a.addView(check("Conectar sola", prefs.getBoolean("autoconnect", true)) {
             autoConnect = it
@@ -337,8 +382,25 @@ class MainActivity : Activity(), DeckIO {
         return panel
     }
 
-    private fun togglePanel() {
+    private fun toggleKeys() {
         haptic()
+        if (keys.isOpen) {
+            closeKeys()
+        } else {
+            if (panel.visibility == View.VISIBLE) togglePanel()
+            keys.open()
+            keyGlyph.alpha = 1f
+        }
+    }
+
+    private fun closeKeys() {
+        keys.close()
+        keyGlyph.alpha = 0.38f
+    }
+
+    /** Sin haptico propio: lo da quien lo abre, y asi abrir uno cerrando el otro no vibra dos veces. */
+    private fun togglePanel() {
+        if (keys.isOpen) closeKeys()
         if (panel.visibility == View.VISIBLE) {
             panel.animate().translationY(panel.height.toFloat()).setDuration(150)
                 .withEndAction { panel.visibility = View.GONE }.start()
@@ -351,7 +413,11 @@ class MainActivity : Activity(), DeckIO {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (panel.visibility == View.VISIBLE) togglePanel() else super.onBackPressed()
+        when {
+            panel.visibility == View.VISIBLE -> togglePanel()
+            keys.isOpen -> closeKeys()
+            else -> super.onBackPressed()
+        }
     }
 
     private fun applyTarget() {

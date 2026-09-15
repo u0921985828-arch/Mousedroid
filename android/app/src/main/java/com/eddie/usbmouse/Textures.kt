@@ -85,12 +85,15 @@ class MetalDrawable(
 
     override fun draw(canvas: Canvas) {
         val b = bounds
-        rect.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
-        val r = if (topOnly) radius else radius
-        canvas.drawRoundRect(rect, r, r, bevel)
+        // topOnly: se estira el rectangulo por debajo del recorte para que las
+        // esquinas de abajo caigan fuera y solo se redondeen las de arriba. Un
+        // Path costaria lo mismo de escribir pero se recrearia por fotograma.
+        val fondo = b.bottom.toFloat() + if (topOnly) radius else 0f
+        rect.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), fondo)
+        canvas.drawRoundRect(rect, radius, radius, bevel)
         rect.top += 1f
-        canvas.drawRoundRect(rect, r, r, base)
-        canvas.drawRoundRect(rect, r, r, veta)
+        canvas.drawRoundRect(rect, radius, radius, base)
+        canvas.drawRoundRect(rect, radius, radius, veta)
     }
 
     override fun setAlpha(alpha: Int) { base.alpha = alpha }
