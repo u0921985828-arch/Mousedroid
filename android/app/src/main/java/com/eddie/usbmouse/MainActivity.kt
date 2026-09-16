@@ -1,8 +1,11 @@
 package com.eddie.usbmouse
 
+import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -40,7 +43,16 @@ class MainActivity : Activity(), DeckIO {
     private val LED_WAIT = "#D9B45A"
     private val LED_OFF = "#575B60"
 
-    private lateinit var client: MouseClient
+    private lateinit var usb: MouseClient
+    private var bt: BtHid? = null
+    private var btMode = false
+
+    /**
+     * Por donde salen las ordenes ahora mismo. El resto de la Activity no
+     * distingue: el cable necesita un PC con el servidor, el Bluetooth no
+     * necesita nada al otro lado.
+     */
+    private val link: Transport get() = if (btMode) (bt ?: usb) else usb
     private lateinit var deck: Deck
     private lateinit var keys: KeyDeck
     private lateinit var led: LedView
@@ -77,11 +89,13 @@ class MainActivity : Activity(), DeckIO {
         family = prefs.getInt("family", 1)
         tier = prefs.getInt("tier", 1)
 
-        client = MouseClient { msg -> runOnUiThread { onStatus(msg) } }
+        usb = MouseClient { msg -> runOnUiThread { onStatus(msg) } }
+        btMode = prefs.getBoolean("bt", false)
         deck = Deck(this, this)
         keys = KeyDeck(this, this)
         setContentView(buildChassis())
         rebuild()
+        if (btMode) arrancarBt()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -102,14 +116,14 @@ class MainActivity : Activity(), DeckIO {
 
     // El movimiento no escribe en pantalla: formatear en cada evento tactil era
     // trabajo puro de descarte. El lector solo refleja acciones discretas.
-    override fun move(dx: Float, dy: Float) = client.move(dx, dy)
+    override fun move(dx: Float, dy: Float) = link.move(dx, dy)
 
-    override fun scroll(dx: Float, dy: Float) = client.scroll(dx, dy)
+    override fun scroll(dx: Float, dy: Float) = link.scroll(dx, dy)
 
-    override fun click(b: Char) { client.click(b); lastWire = 0; say("C $b") }
+    override fun click(b: Char) { link.click(b); lastWire = 0; say("C $b") }
 
     override fun button(b: Char, down: Boolean) {
-        client.button(b, down); lastWire = 0; say("${if (down) "D" else "U"} $b")
+        link.button(b, down); lastWire = 0; say("${if (down) "D" else "U"} $b")
     }
 
     /**
@@ -120,23 +134,31 @@ class MainActivity : Activity(), DeckIO {
      */
     override fun macro(tag: String, down: Boolean) {
         when (tag) {
-            Macro.BACK -> if (down) client.combo("a", "left")
-            Macro.FWD -> if (down) client.combo("a", "right")
-            Macro.G1 -> client.keyHold("f13", down)
-            Macro.G2 -> client.keyHold("f14", down)
-            Macro.G3 -> client.keyHold("f15", down)
-            Macro.G4 -> client.keyHold("f16", down)
+            Macro.BACK -> if (down) link.combo("a", "left")
+            Macro.FWD -> if (down) link.combo("a", "right")
+            Macro.G1 -> link.keyHold("f13", down)
+            Macro.G2 -> link.keyHold("f14", down)
+            Macro.G3 -> link.keyHold("f15", down)
+            Macro.G4 -> link.keyHold("f16", down)
         }
         if (down) { lastWire = 0; say(tag) }
     }
 
     // El lector no repite lo escrito: lo que se teclea puede ser una contraseña.
-    override fun text(s: String) { client.text(s); lastWire = 0; say("K·") }
+    override fun text(s: String) {
+        link.text(s)
+        lastWire = 0
+        // Un teclado HID manda POSICIONES de tecla, no letras: las tildes y la
+        // eñe no tienen posicion en la distribucion que se supone. Mejor avisar
+        // que tragarselas en silencio.
+        val fuera = if (btMode) HidKeys.unsupported(s) else ""
+        say(if (fuera.isEmpty()) "K·" else "sin HID: $fuera")
+    }
 
-    override fun key(name: String) { client.key(name); lastWire = 0; say(name) }
+    override fun key(name: String) { link.key(name); lastWire = 0; say(name) }
 
     override fun combo(mods: String, name: String) {
-        client.combo(mods, name); lastWire = 0; say("$mods+$name")
+        link.combo(mods, name); lastWire = 0; say("$mods+$name")
     }
 
     override fun haptic() {
@@ -156,7 +178,7 @@ class MainActivity : Activity(), DeckIO {
     }
 
     private fun onStatus(msg: String) {
-        val ok = client.isConnected
+        val ok = link.isConnected
         led.color = col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF)
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
@@ -350,7 +372,7 @@ class MainActivity : Activity(), DeckIO {
         a.addView(check("Conectar sola", prefs.getBoolean("autoconnect", true)) {
             autoConnect = it
             prefs.edit().putBoolean("autoconnect", it).apply()
-            if (it) startAutoLoop() else client.close()
+            if (it) startAutoLoop() else usb.close()
             onStatus("")
         })
         b.addView(check("Scroll natural", prefs.getBoolean("natural", false)) {
@@ -362,13 +384,24 @@ class MainActivity : Activity(), DeckIO {
             prefs.edit().putBoolean("autolaunch", it).apply()
             if (it) requestOverlay()
         })
+        a.addView(check("Bluetooth (sin PC)", prefs.getBoolean("bt", false)) {
+            prefs.edit().putBoolean("bt", it).apply()
+            btMode = it
+            if (it) arrancarBt() else { bt?.close(); bt = null; startAutoLoop() }
+            onStatus(if (it) "Modo Bluetooth" else "Modo cable")
+        })
+        b.addView(etched("Elegir aparato…", 13f, Monet.etch).apply {
+            setPadding(0, dp(6), 0, dp(6))
+            setOnClickListener { elegirAparato() }
+        })
         grid.addView(a, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         grid.addView(b, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             bottomMargin = dp(12)
         })
 
-        panel.addView(etched("Destino    auto = túnel USB y búsqueda automática", 11f, Monet.etchDim))
+        panel.addView(etched("Destino por cable    auto = túnel USB y búsqueda automática",
+            11f, Monet.etchDim))
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -440,8 +473,8 @@ class MainActivity : Activity(), DeckIO {
         val host = hostIn.text.toString().trim().ifEmpty { "auto" }
         val port = portIn.text.toString().trim().toIntOrNull() ?: 8777
         prefs.edit().putString("host", host).putInt("port", port).apply()
-        client.close()
-        if (!host.equals("auto", true)) client.connect(host, port)
+        usb.close()
+        if (!host.equals("auto", true)) usb.connect(host, port)
         startAutoLoop()
     }
 
@@ -456,6 +489,59 @@ class MainActivity : Activity(), DeckIO {
         }
     }
 
+    // ------------------------------------------------------------ bluetooth
+
+    /**
+     * Arranca el modo periferico. En Android 12+ BLUETOOTH_CONNECT se pide en
+     * caliente; por debajo basta con declararlo en el manifiesto.
+     */
+    private fun arrancarBt() {
+        if (!BtHid.disponible()) {
+            say("Bluetooth HID pide Android 9")
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 31 &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 7)
+            return
+        }
+        usb.close()
+        val b = bt ?: BtHid(this) { msg -> runOnUiThread { onStatus(msg) } }.also { bt = it }
+        b.start(prefs.getString("btmac", null))
+    }
+
+    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
+        super.onRequestPermissionsResult(code, perms, res)
+        if (code == 7) {
+            if (res.isNotEmpty() && res[0] == PackageManager.PERMISSION_GRANTED) arrancarBt()
+            else say("Sin permiso de Bluetooth")
+        }
+    }
+
+    /** Lista de emparejados. El aparato elegido se recuerda por su MAC. */
+    private fun elegirAparato() {
+        val b = bt ?: BtHid(this) { msg -> runOnUiThread { onStatus(msg) } }.also { bt = it }
+        val lista = b.paired()
+        if (lista.isEmpty()) {
+            Toast.makeText(this, "Empareja antes la tele o el PC en Ajustes",
+                Toast.LENGTH_LONG).show()
+            try { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) } catch (_: Exception) {}
+            return
+        }
+        val nombres = lista.map { d -> try { d.name ?: d.address } catch (_: Throwable) { d.address } }
+        AlertDialog.Builder(this)
+            .setTitle("¿A qué aparato?")
+            .setItems(nombres.toTypedArray()) { _, i ->
+                prefs.edit().putString("btmac", lista[i].address).apply()
+                bt?.close()
+                bt = null
+                arrancarBt()
+            }
+            .show()
+    }
+
     // ------------------------------------------------------------ conexion
 
     private fun startAutoLoop() {
@@ -463,18 +549,18 @@ class MainActivity : Activity(), DeckIO {
         autoRunning = true
         Thread {
             while (autoRunning) {
-                if (autoConnect && !client.isConnected) {
+                if (autoConnect && !btMode && !usb.isConnected) {
                     val typed = prefs.getString("host", "auto") ?: "auto"
                     val port = prefs.getInt("port", 8777)
                     if (typed.equals("auto", true) || typed.isEmpty()) {
-                        client.connect("127.0.0.1", port)
+                        usb.connect("127.0.0.1", port)
                         Thread.sleep(600)
-                        if (!client.isConnected) {
+                        if (!usb.isConnected) {
                             val found = Discovery.find()
-                            if (found != null) client.connect(found.first, found.second)
+                            if (found != null) usb.connect(found.first, found.second)
                         }
                     } else {
-                        client.connect(typed, port)
+                        usb.connect(typed, port)
                     }
                 }
                 try { Thread.sleep(1500) } catch (_: InterruptedException) { break }
@@ -491,7 +577,8 @@ class MainActivity : Activity(), DeckIO {
 
     override fun onDestroy() {
         autoRunning = false
-        client.close()
+        usb.close()
+        bt?.close()
         super.onDestroy()
     }
 }

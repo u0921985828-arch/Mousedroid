@@ -12,7 +12,7 @@ import kotlin.math.abs
  * Cliente TCP. Los movimientos se acumulan y se envian a ~120 Hz para no
  * saturar el socket; los clicks salen de inmediato por una cola aparte.
  */
-class MouseClient(private val onStatus: (String) -> Unit) {
+class MouseClient(private val onStatus: (String) -> Unit) : Transport {
 
     private val connected = AtomicBoolean(false)
     private val busy = AtomicBoolean(false)
@@ -27,12 +27,16 @@ class MouseClient(private val onStatus: (String) -> Unit) {
     private var accSx = 0f
     private var accSy = 0f
 
-    val isConnected: Boolean get() = connected.get()
+    override val isConnected: Boolean get() = connected.get()
+
+    private var destino = ""
+    override val label: String get() = destino
 
     /** Seguro de llamar en bucle: ignora la llamada si ya hay conexion o intento en curso. */
     fun connect(host: String, port: Int) {
         if (connected.get()) return
         if (!busy.compareAndSet(false, true)) return
+        destino = "$host:$port"
         onStatus("Conectando a $host:$port...")
         Thread {
             try {
@@ -139,40 +143,41 @@ class MouseClient(private val onStatus: (String) -> Unit) {
         return n
     }
 
-    fun move(dx: Float, dy: Float) {
+    override fun move(dx: Float, dy: Float) {
         if (!connected.get()) return
         synchronized(lock) { accDx += dx; accDy += dy }
     }
 
-    fun scroll(dx: Float, dy: Float) {
+    override fun scroll(dx: Float, dy: Float) {
         if (!connected.get()) return
         synchronized(lock) { accSx += dx; accSy += dy }
     }
 
-    fun click(b: Char) = urgent.offer("C$b\n")
+    override fun click(b: Char) { urgent.offer("C$b\n") }
 
-    fun button(b: Char, down: Boolean) = urgent.offer("${if (down) "D" else "U"}$b\n")
+    override fun button(b: Char, down: Boolean) { urgent.offer("${if (down) "D" else "U"}$b\n") }
 
     // ---------------------------------------------------------------- teclado
     // Todo esto va por la cola urgente: son acciones discretas, no ruta caliente.
     // Un salto de linea partiria el comando en dos, asi que aqui no entra: el
     // Enter viaja como tecla, no como texto.
 
-    fun text(s: String) {
+    override fun text(s: String) {
         if (s.isEmpty()) return
         val clean = s.replace('\n', ' ').replace("\r", "")
         if (clean.isNotEmpty()) urgent.offer("K$clean\n")
     }
 
-    fun key(name: String) = urgent.offer("E$name\n")
+    override fun key(name: String) { urgent.offer("E$name\n") }
 
-    fun keyHold(name: String, down: Boolean) =
+    override fun keyHold(name: String, down: Boolean) {
         urgent.offer("E${if (down) "+" else "-"}$name\n")
+    }
 
     /** mods: letras de c(ctrl) a(alt) s(shift) w(win). */
-    fun combo(mods: String, name: String) = urgent.offer("H$mods,$name\n")
+    override fun combo(mods: String, name: String) { urgent.offer("H$mods,$name\n") }
 
-    fun close() {
+    override fun close() {
         if (connected.getAndSet(false)) onStatus("Desconectado")
         closeQuiet()
     }

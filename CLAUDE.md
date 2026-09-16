@@ -1,8 +1,16 @@
 # USB Mouse
 
-El móvil hace de ratón del PC por cable. App Android (Kotlin) → socket TCP → `adb reverse` o
-anclaje USB → servidor Python que mueve el cursor real con `pynput`. Sin root, sin Bluetooth,
-sin internet en tiempo de ejecución.
+El móvil hace de ratón. Dos transportes, elegibles en los ajustes, detrás de la misma interfaz
+(`Transport`):
+
+- **Cable** — socket TCP → `adb reverse` o anclaje USB → servidor Python con `pynput`. Necesita
+  un PC con `server.py` corriendo.
+- **Bluetooth HID** — el móvil **se presenta como un ratón y un teclado de verdad**
+  (`BluetoothHidDevice`, Android 9+). No hace falta nada al otro lado: vale contra una tele, una
+  tablet, una consola o un PC. Y al ser HID real lo ven también los juegos que leen entrada en
+  crudo, que con `pynput` se quedaban sin enterarse.
+
+Sin root, sin internet en tiempo de ejecución.
 
 ## Stack exacto
 
@@ -28,7 +36,10 @@ android/
     Deck.kt           fábrica de disposiciones (6 modos) + GlyphView, PipsView, PadStack, plate()
     TouchpadView.kt   superficie de gestos (RUTA CALIENTE) + PadSink + HaloView + ScrollStripView
     Keys.kt           capa de teclado: CaptureField (IME) + KeyDeck (teclas que el móvil no da)
-    MouseClient.kt    socket, coalescencia de movimiento, emisión sin asignaciones
+    Transport.kt      la interfaz que comparten los dos transportes
+    MouseClient.kt    transporte por cable: socket, coalescencia, emisión sin asignaciones
+    BtHid.kt          transporte Bluetooth: descriptor HID, registro del perfil, informes
+    HidKeys.kt        protocolo -> códigos HID (USB HID Usage Tables, página 0x07)
     Discovery.kt      sondeo UDP para encontrar el PC sin escribir IP
     Monet.kt          paleta dinámica (system_* en API 31+, muestreo del fondo por debajo)
     Textures.kt       ruido procedural cacheado + MetalDrawable
@@ -169,6 +180,15 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   o lo sacas del árbol, deja de recibir el IME.
 - **`adb reverse` va del móvil al PC**: el móvil escucha en su `127.0.0.1:8777` y el tráfico
   sale por el cable. El servidor escucha en el `127.0.0.1` del PC. No inviertas la dirección.
+- **El descriptor HID de `BtHid` no se toca a ojo.** Es el descriptor de combo estándar (ratón
+  con tres botones y rueda en el informe 1, teclado de seis teclas en el 2). Un byte mal puesto
+  deja el aparato mudo sin decir por qué, porque el anfitrión simplemente ignora el informe.
+- **Un teclado HID manda posiciones de tecla, no letras.** La distribución la pone el equipo del
+  otro lado, así que `HidKeys.charOf` supone un anfitrión en US y las tildes y la eñe se quedan
+  fuera; el lector lo avisa. Por cable esto no pasaba: `pynput` escribía el texto tal cual. Es lo
+  que se paga por ser un periférico de verdad en vez de un programa.
+- **Los dos transportes no conviven**: al encender el Bluetooth se cierra el socket, y al
+  apagarlo se rearranca el bucle de reconexión por cable.
 - **`PowerReceiver`** solo puede abrir la Activity si está concedido "Mostrar sobre otras apps".
   Sin ese permiso falla en silencio, y es correcto que falle en silencio.
 - Cambiar de modo reconstruye `stageHost`, no la Activity: la conexión no debe cortarse.
