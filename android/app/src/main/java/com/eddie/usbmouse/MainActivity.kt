@@ -509,7 +509,24 @@ class MainActivity : Activity(), DeckIO {
         }
         usb.close()
         val b = bt ?: BtHid(this) { msg -> runOnUiThread { onStatus(msg) } }.also { bt = it }
-        b.start(prefs.getString("btmac", null))
+        val mac = prefs.getString("btmac", null)
+        b.start(mac)
+        // Registrar el perfil no hace visible al movil. Sin esto el PC o la tele
+        // buscan y no encuentran nada: hay que pedirlo aparte, y es un dialogo
+        // del sistema, asi que solo se pide cuando aun no hay aparato elegido.
+        if (mac == null) hacerseVisible()
+    }
+
+    /** Cinco minutos de visibilidad para que el anfitrion pueda emparejar. */
+    private fun hacerseVisible() {
+        try {
+            startActivity(
+                Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+                    .putExtra(android.bluetooth.BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+            )
+        } catch (_: Exception) {
+            say("No pude pedir visibilidad")
+        }
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
@@ -530,10 +547,15 @@ class MainActivity : Activity(), DeckIO {
             try { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) } catch (_: Exception) {}
             return
         }
-        val nombres = lista.map { d -> try { d.name ?: d.address } catch (_: Throwable) { d.address } }
+        val nombres = ArrayList<String>(lista.size + 1)
+        lista.forEach { d ->
+            nombres.add(try { d.name ?: d.address } catch (_: Throwable) { d.address })
+        }
+        nombres.add("Hacerme visible 5 min…")
         AlertDialog.Builder(this)
             .setTitle("¿A qué aparato?")
             .setItems(nombres.toTypedArray()) { _, i ->
+                if (i == lista.size) { hacerseVisible(); return@setItems }
                 prefs.edit().putString("btmac", lista[i].address).apply()
                 bt?.close()
                 bt = null
