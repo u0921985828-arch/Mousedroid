@@ -43,7 +43,7 @@ class MainActivity : Activity(), DeckIO {
     private lateinit var client: MouseClient
     private lateinit var deck: Deck
     private lateinit var keys: KeyDeck
-    private lateinit var led: View
+    private lateinit var led: LedView
     private lateinit var wire: TextView
     private lateinit var stageHost: FrameLayout
     private lateinit var panel: LinearLayout
@@ -157,10 +157,7 @@ class MainActivity : Activity(), DeckIO {
 
     private fun onStatus(msg: String) {
         val ok = client.isConnected
-        led.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF))
-        }
+        led.color = col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF)
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
         if (msg.isNotEmpty()) { lastWire = 0; say(msg) }
@@ -183,7 +180,7 @@ class MainActivity : Activity(), DeckIO {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), dp(10), dp(11), dp(14))
         }
-        colv.addView(head(), LinearLayout.LayoutParams(MATCH_PARENT, dp(30)))
+        colv.addView(head(), LinearLayout.LayoutParams(MATCH_PARENT, dp(38)))
         stageHost = FrameLayout(this)
         colv.addView(stageHost, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply {
             topMargin = dp(9)
@@ -218,17 +215,16 @@ class MainActivity : Activity(), DeckIO {
     }
 
     private fun head(): View {
+        // Chapa embutida y no texto suelto sobre el chasis: en un aparato la
+        // instrumentacion va montada en su propia pieza, no serigrafiada al aire.
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), 0, dp(2), 0)
+            background = plate(this@MainActivity, 9)
+            setPadding(dp(9), 0, dp(6), 0)
         }
-        led = View(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL; setColor(col(LED_OFF))
-            }
-        }
-        bar.addView(led, LinearLayout.LayoutParams(dp(7), dp(7)).apply { rightMargin = dp(10) })
+        led = LedView(this).apply { color = col(LED_OFF) }
+        bar.addView(led, LinearLayout.LayoutParams(dp(16), dp(16)).apply { rightMargin = dp(9) })
 
         wire = etched("—", 10.5f, Monet.etchDim).apply { typeface = Typeface.MONOSPACE }
         bar.addView(wire, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))

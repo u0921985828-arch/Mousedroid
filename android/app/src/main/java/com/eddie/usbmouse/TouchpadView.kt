@@ -111,10 +111,15 @@ class TouchpadView(context: Context) : View(context) {
         super.onSizeChanged(w, h, ow, oh)
         glass.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
             Monet.glassLo, Monet.glassHi, Shader.TileMode.CLAMP)
-        // reflejo diagonal suave: el plano deja de leerse como un rectangulo pintado
-        sheen.shader = LinearGradient(0f, 0f, w * 0.8f, h.toFloat(),
-            intArrayOf(Color.argb(16, 255, 255, 255), Color.argb(0, 255, 255, 255)),
-            floatArrayOf(0f, 0.55f), Shader.TileMode.CLAMP)
+        // Banda diagonal marcada, no un velo: en las referencias es lo que
+        // convierte el rectangulo en una lamina de cristal de verdad.
+        sheen.shader = LinearGradient(0f, 0f, w * 0.85f, h.toFloat(),
+            intArrayOf(
+                Color.argb(34, 255, 255, 255),
+                Color.argb(11, 255, 255, 255),
+                Color.argb(0, 255, 255, 255)
+            ),
+            floatArrayOf(0f, 0.38f, 0.64f), Shader.TileMode.CLAMP)
         face.set(0f, 1f * d, w.toFloat(), h.toFloat())
     }
 
@@ -313,6 +318,7 @@ class ScrollStripView(context: Context, private val wheel: Boolean = false) : Vi
     }
     private val bevel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(24, 255, 255, 255) }
     private val rail = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val groove = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(110, 0, 0, 0) }
     private var cRailIdle = Color.parseColor("#3A4149")
     private var cRailOn = Color.parseColor("#8FB4FF")
     private val face = RectF()
@@ -348,9 +354,14 @@ class ScrollStripView(context: Context, private val wheel: Boolean = false) : Vi
                 y += 5f * d
             }
         } else {
-            val h = height * 0.15f
-            canvas.drawRoundRect(cx - 1.5f * d, height / 2f - h / 2f,
-                cx + 1.5f * d, height / 2f + h / 2f, 2f * d, 2f * d, rail)
+            // Canal hundido de punta a punta con un pulgar centrado. Antes era
+            // una rayita suelta al medio y no se leia como un mando.
+            val m = 12f * d
+            val gw = 3f * d
+            canvas.drawRoundRect(cx - gw / 2f, m, cx + gw / 2f, height - m, gw / 2f, gw / 2f, groove)
+            val th = (height - 2f * m) * 0.18f
+            val ty = height / 2f - th / 2f
+            canvas.drawRoundRect(cx - gw / 2f, ty, cx + gw / 2f, ty + th, gw / 2f, gw / 2f, rail)
         }
     }
 

@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RadialGradient
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -98,6 +100,49 @@ class GlyphView(context: Context, private val kind: String) : View(context) {
                 p.alpha = a
             }
         }
+    }
+}
+
+/**
+ * El LED. En las referencias no es un punto de color plano: es una lampara, con
+ * halo alrededor, aro y nucleo. Es el unico elemento del aparato que emite luz.
+ */
+class LedView(context: Context) : View(context) {
+
+    private val d = resources.displayMetrics.density
+    private val halo = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val aro = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.4f * d
+    }
+    private val nucleo = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    var color: Int = Color.parseColor("#575B60")
+        set(v) { field = v; resolver(); invalidate() }
+
+    // el degradado se arma al cambiar de tamaño o de color, nunca por fotograma
+    private fun resolver() {
+        aro.color = Monet.alpha(color, 210)
+        nucleo.color = color
+        if (width == 0) return
+        val r = width / 2f
+        halo.shader = RadialGradient(
+            r, r, r,
+            intArrayOf(Monet.alpha(color, 110), Monet.alpha(color, 0)),
+            floatArrayOf(0.3f, 1f), Shader.TileMode.CLAMP
+        )
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        super.onSizeChanged(w, h, ow, oh)
+        resolver()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val c = width / 2f
+        canvas.drawCircle(c, c, c, halo)
+        canvas.drawCircle(c, c, c * 0.42f, nucleo)
+        canvas.drawCircle(c, c, c * 0.60f, aro)
     }
 }
 
@@ -374,7 +419,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
         }
     }
 
-    private fun hairline(): View = View(ctx).apply { setBackgroundColor(Color.argb(87, 0, 0, 0)) }
+    private fun hairline(): View = View(ctx).apply { setBackgroundColor(Color.argb(125, 0, 0, 0)) }
 
     private lateinit var padRef: TouchpadView
 
