@@ -45,14 +45,31 @@ class MainActivity : Activity(), DeckIO {
 
     private lateinit var usb: MouseClient
     private var bt: BtHid? = null
-    private var btMode = false
+
+    /** 0 auto, 1 solo cable, 2 solo bluetooth. */
+    private var modo = AUTO
 
     /**
-     * Por donde salen las ordenes ahora mismo. El resto de la Activity no
-     * distingue: el cable necesita un PC con el servidor, el Bluetooth no
-     * necesita nada al otro lado.
+     * Por donde salen las ordenes AHORA MISMO.
+     *
+     * En automatico los dos transportes estan levantados a la vez —el Bluetooth
+     * no molesta mientras nadie se conecte, solo se anuncia— y manda el que este
+     * enganchado. Si lo estan los dos gana el cable: menos latencia y es el unico
+     * que escribe tildes.
      */
-    private val link: Transport get() = if (btMode) (bt ?: usb) else usb
+    private val link: Transport
+        get() {
+            val b = bt
+            return when {
+                modo == CABLE -> usb
+                modo == BLUETOOTH -> b ?: usb
+                usb.isConnected -> usb
+                b != null && b.isConnected -> b
+                else -> usb
+            }
+        }
+
+    private val btMode: Boolean get() = link !== usb
     private lateinit var deck: Deck
     private lateinit var keys: KeyDeck
     private lateinit var led: LedView
@@ -66,6 +83,13 @@ class MainActivity : Activity(), DeckIO {
     private lateinit var keyGlyph: GlyphView
     private lateinit var tierPips: PipsView
     private var vib: Vibrator? = null
+
+    companion object {
+        private const val AUTO = 0
+        private const val CABLE = 1
+        private const val BLUETOOTH = 2
+        private val MODOS = arrayOf("Auto", "Cable", "Bluetooth")
+    }
 
     private var family = 1   // 0 raton, 1 panel
     private var tier = 1     // 0 basico, 1 premium, 2 gaming
@@ -90,12 +114,13 @@ class MainActivity : Activity(), DeckIO {
         tier = prefs.getInt("tier", 1)
 
         usb = MouseClient { msg -> runOnUiThread { onStatus(msg) } }
-        btMode = prefs.getBoolean("bt", false)
+        // migracion del interruptor viejo de dos estados
+        modo = prefs.getInt("modo", if (prefs.getBoolean("bt", false)) BLUETOOTH else AUTO)
         deck = Deck(this, this)
         keys = KeyDeck(this, this)
         setContentView(buildChassis())
         rebuild()
-        if (btMode) arrancarBt()
+        arrancarEnlace()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -178,11 +203,15 @@ class MainActivity : Activity(), DeckIO {
     }
 
     private fun onStatus(msg: String) {
-        val ok = link.isConnected
+        val l = link
+        val ok = l.isConnected
         led.color = col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF)
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
-        if (msg.isNotEmpty()) { lastWire = 0; say(msg) }
+        // En automatico, ademas, hay que decir CUAL de los dos enlaces ganó.
+        if (msg.isEmpty()) return
+        lastWire = 0
+        say(if (ok && modo == AUTO) "${if (l === usb) "cable" else "bt"} · ${l.label}" else msg)
     }
 
     // ------------------------------------------------------------ chasis
@@ -384,12 +413,19 @@ class MainActivity : Activity(), DeckIO {
             prefs.edit().putBoolean("autolaunch", it).apply()
             if (it) requestOverlay()
         })
-        a.addView(check("Bluetooth (sin PC)", prefs.getBoolean("bt", false)) {
-            prefs.edit().putBoolean("bt", it).apply()
-            btMode = it
-            if (it) arrancarBt() else { bt?.close(); bt = null; startAutoLoop() }
-            onStatus(if (it) "Modo Bluetooth" else "Modo cable")
-        })
+        val enlace = etched("Enlace: ${MODOS[modo]}", 13f, Monet.etch).apply {
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        enlace.setOnClickListener {
+            modo = (modo + 1) % 3
+            prefs.edit().putInt("modo", modo).apply()
+            enlace.text = "Enlace: ${MODOS[modo]}"
+            haptic()
+            bt?.close(); bt = null
+            arrancarEnlace()
+            onStatus("Enlace: ${MODOS[modo]}")
+        }
+        a.addView(enlace)
         b.addView(etched("Elegir aparato…", 13f, Monet.etch).apply {
             setPadding(0, dp(6), 0, dp(6))
             setOnClickListener { elegirAparato() }
@@ -495,9 +531,20 @@ class MainActivity : Activity(), DeckIO {
      * Arranca el modo periferico. En Android 12+ BLUETOOTH_CONNECT se pide en
      * caliente; por debajo basta con declararlo en el manifiesto.
      */
-    private fun arrancarBt() {
+    /**
+     * Levanta lo que toque segun el modo. En automatico levanta los dos: el
+     * cable reintenta en bucle y el Bluetooth se queda anunciado esperando que
+     * alguien empareje. El primero que conteste se lleva el mando.
+     */
+    private fun arrancarEnlace() {
+        if (modo != BLUETOOTH) startAutoLoop() else usb.close()
+        if (modo != CABLE) arrancarBt(pedirVisible = modo == BLUETOOTH)
+        else { bt?.close(); bt = null }
+    }
+
+    private fun arrancarBt(pedirVisible: Boolean) {
         if (!BtHid.disponible()) {
-            say("Bluetooth HID pide Android 9")
+            if (modo == BLUETOOTH) say("Bluetooth HID pide Android 9")
             return
         }
         if (Build.VERSION.SDK_INT >= 31 &&
@@ -507,14 +554,14 @@ class MainActivity : Activity(), DeckIO {
             requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 7)
             return
         }
-        usb.close()
         val b = bt ?: BtHid(this) { msg -> runOnUiThread { onStatus(msg) } }.also { bt = it }
         val mac = prefs.getString("btmac", null)
         b.start(mac)
-        // Registrar el perfil no hace visible al movil. Sin esto el PC o la tele
-        // buscan y no encuentran nada: hay que pedirlo aparte, y es un dialogo
-        // del sistema, asi que solo se pide cuando aun no hay aparato elegido.
-        if (mac == null) hacerseVisible()
+        // Registrar el perfil anuncia el servicio pero NO hace visible al movil:
+        // el anfitrion busca y no encuentra nada, sin ningun error de por medio.
+        // Es un dialogo del sistema, asi que en automatico no se saca a la cara:
+        // solo cuando se pide Bluetooth a proposito y aun no hay aparato.
+        if (pedirVisible && mac == null) hacerseVisible()
     }
 
     /** Cinco minutos de visibilidad para que el anfitrion pueda emparejar. */
@@ -532,7 +579,8 @@ class MainActivity : Activity(), DeckIO {
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
         super.onRequestPermissionsResult(code, perms, res)
         if (code == 7) {
-            if (res.isNotEmpty() && res[0] == PackageManager.PERMISSION_GRANTED) arrancarBt()
+            if (res.isNotEmpty() && res[0] == PackageManager.PERMISSION_GRANTED)
+                arrancarBt(pedirVisible = modo == BLUETOOTH)
             else say("Sin permiso de Bluetooth")
         }
     }
@@ -559,7 +607,7 @@ class MainActivity : Activity(), DeckIO {
                 prefs.edit().putString("btmac", lista[i].address).apply()
                 bt?.close()
                 bt = null
-                arrancarBt()
+                arrancarBt(pedirVisible = false)
             }
             .show()
     }
@@ -571,7 +619,7 @@ class MainActivity : Activity(), DeckIO {
         autoRunning = true
         Thread {
             while (autoRunning) {
-                if (autoConnect && !btMode && !usb.isConnected) {
+                if (autoConnect && modo != BLUETOOTH && !usb.isConnected) {
                     val typed = prefs.getString("host", "auto") ?: "auto"
                     val port = prefs.getInt("port", 8777)
                     if (typed.equals("auto", true) || typed.isEmpty()) {

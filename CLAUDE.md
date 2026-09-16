@@ -1,7 +1,7 @@
 # USB Mouse
 
-El móvil hace de ratón. Dos transportes, elegibles en los ajustes, detrás de la misma interfaz
-(`Transport`):
+El móvil hace de ratón. Dos transportes detrás de la misma interfaz (`Transport`), con tres
+modos de enlace en los ajustes — **Auto**, **Cable**, **Bluetooth**:
 
 - **Cable** — socket TCP → `adb reverse` o anclaje USB → servidor Python con `pynput`. Necesita
   un PC con `server.py` corriendo.
@@ -9,6 +9,15 @@ El móvil hace de ratón. Dos transportes, elegibles en los ajustes, detrás de 
   (`BluetoothHidDevice`, Android 9+). No hace falta nada al otro lado: vale contra una tele, una
   tablet, una consola o un PC. Y al ser HID real lo ven también los juegos que leen entrada en
   crudo, que con `pynput` se quedaban sin enterarse.
+
+En **Auto** los dos están levantados a la vez: el cable reintenta en bucle y el Bluetooth se
+queda anunciado esperando a que alguien empareje. Manda el que esté enganchado, y si lo están los
+dos gana el cable — menos latencia y es el único que escribe tildes. El lector de la cabecera
+dice cuál ganó (`cable · 127.0.0.1:8777`, `bt · Salón`).
+
+Con eso una sola herramienta cubre los cuatro escenarios: túnel adb, anclaje USB, Wi-Fi y
+Bluetooth HID. El campo de destino en `auto` ya prueba el túnel y luego lanza el sondeo UDP, que
+encuentra el PC tanto por anclaje como por red.
 
 Sin root, sin internet en tiempo de ejecución.
 
@@ -187,8 +196,12 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   otro lado, así que `HidKeys.charOf` supone un anfitrión en US y las tildes y la eñe se quedan
   fuera; el lector lo avisa. Por cable esto no pasaba: `pynput` escribía el texto tal cual. Es lo
   que se paga por ser un periférico de verdad en vez de un programa.
-- **Los dos transportes no conviven**: al encender el Bluetooth se cierra el socket, y al
-  apagarlo se rearranca el bucle de reconexión por cable.
+- **En Auto los dos transportes conviven**, y es a propósito: el Bluetooth anunciado no molesta
+  mientras nadie empareje, y así no hay que adivinar de antemano qué habrá delante. `link` elige
+  en cada llamada; en modo forzado manda el que se haya puesto.
+- **La visibilidad Bluetooth no se pide en Auto.** `ACTION_REQUEST_DISCOVERABLE` es un diálogo
+  del sistema y sacarlo en cada arranque es intolerable. Solo sale al pedir Bluetooth a propósito
+  y cuando aún no hay aparato guardado; para repetirlo está «Hacerme visible 5 min…».
 - **`PowerReceiver`** solo puede abrir la Activity si está concedido "Mostrar sobre otras apps".
   Sin ese permiso falla en silencio, y es correcto que falle en silencio.
 - Cambiar de modo reconstruye `stageHost`, no la Activity: la conexión no debe cortarse.
