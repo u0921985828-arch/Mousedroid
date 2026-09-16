@@ -91,6 +91,12 @@ class TouchpadView(context: Context) : View(context) {
         strokeWidth = 1f * d
     }
     private val sheen = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val costura = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * d
+        color = Color.argb(150, 0, 0, 0)
+    }
+    private var bisel: LinearGradient? = null
 
     // colores resueltos una sola vez
     private var cInnerIdle = Color.argb(89, 0, 0, 0)
@@ -119,7 +125,13 @@ class TouchpadView(context: Context) : View(context) {
                 Color.argb(11, 255, 255, 255),
                 Color.argb(0, 255, 255, 255)
             ),
-            floatArrayOf(0f, 0.38f, 0.64f), Shader.TileMode.CLAMP)
+            floatArrayOf(0f, 0.32f, 0.55f), Shader.TileMode.CLAMP)
+        // Bisel interior con degradado: labio claro en el filo de arriba, sombra
+        // en el de abajo. Era un aro del mismo color por los cuatro lados, que es
+        // lo que hace que una pieza no se lea como hundida sino como dibujada.
+        bisel = LinearGradient(0f, 0f, 0f, h.toFloat(),
+            intArrayOf(Color.argb(42, 255, 255, 255), Color.argb(120, 0, 0, 0)),
+            floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
         face.set(0f, 1f * d, w.toFloat(), h.toFloat())
     }
 
@@ -128,12 +140,16 @@ class TouchpadView(context: Context) : View(context) {
         canvas.drawRoundRect(face, radius, radius, glass)
         canvas.drawRoundRect(face, radius, radius, grain)
         canvas.drawRoundRect(face, radius, radius, sheen)
-        inner.color = if (dragging) cInnerDrag else cInnerIdle
+        if (dragging) { inner.shader = null; inner.color = cInnerDrag } else inner.shader = bisel
         canvas.drawRoundRect(
             face.left + 0.5f * d, face.top + 0.5f * d,
             face.right - 0.5f * d, face.bottom - 0.5f * d,
             radius, radius, inner
         )
+        // D. Costura: el plano intermedio entre chasis y cristal. Sin ella solo
+        // hay dos profundidades y la pieza parece pegada encima, no embutida.
+        canvas.drawRoundRect(0.75f * d, 0.75f * d, width - 0.75f * d, height - 0.75f * d,
+            radius, radius, costura)
     }
 
     // ---------------------------------------------------------------- gestos
@@ -318,7 +334,6 @@ class ScrollStripView(context: Context, private val wheel: Boolean = false) : Vi
     }
     private val bevel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(24, 255, 255, 255) }
     private val rail = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val groove = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(110, 0, 0, 0) }
     private var cRailIdle = Color.parseColor("#3A4149")
     private var cRailOn = Color.parseColor("#8FB4FF")
     private val face = RectF()
@@ -334,8 +349,11 @@ class ScrollStripView(context: Context, private val wheel: Boolean = false) : Vi
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
-        glass.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
-            Monet.glassLo, Monet.glassHi, Shader.TileMode.CLAMP)
+        // El rail es CHAPA, no cristal: tiene que quedar entre el chasis y el
+        // cristal, no confundirse con este. La rueda si es cristal.
+        val lo = if (wheel) Monet.glassLo else Monet.plateLo
+        val hi = if (wheel) Monet.glassHi else Monet.plateHi
+        glass.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), lo, hi, Shader.TileMode.CLAMP)
         face.set(0f, 1f * d, w.toFloat(), h.toFloat())
     }
 
@@ -354,14 +372,11 @@ class ScrollStripView(context: Context, private val wheel: Boolean = false) : Vi
                 y += 5f * d
             }
         } else {
-            // Canal hundido de punta a punta con un pulgar centrado. Antes era
-            // una rayita suelta al medio y no se leia como un mando.
-            val m = 12f * d
-            val gw = 3f * d
-            canvas.drawRoundRect(cx - gw / 2f, m, cx + gw / 2f, height - m, gw / 2f, gw / 2f, groove)
-            val th = (height - 2f * m) * 0.18f
-            val ty = height / 2f - th / 2f
-            canvas.drawRoundRect(cx - gw / 2f, ty, cx + gw / 2f, ty + th, gw / 2f, gw / 2f, rail)
+            // Marca fina y centrada, no un canal de punta a punta: la referencia
+            // pide "a thin centred indicator mark" y el rail es chapa, no cristal.
+            val h = height * 0.15f
+            canvas.drawRoundRect(cx - 1.5f * d, height / 2f - h / 2f,
+                cx + 1.5f * d, height / 2f + h / 2f, 2f * d, 2f * d, rail)
         }
     }
 
