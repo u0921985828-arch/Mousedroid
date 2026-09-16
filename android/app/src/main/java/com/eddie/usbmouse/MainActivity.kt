@@ -180,7 +180,7 @@ class MainActivity : Activity(), DeckIO {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), dp(10), dp(11), dp(14))
         }
-        colv.addView(head(), LinearLayout.LayoutParams(MATCH_PARENT, dp(38)))
+        colv.addView(head(), LinearLayout.LayoutParams(MATCH_PARENT, dp(30)))
         stageHost = FrameLayout(this)
         colv.addView(stageHost, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply {
             topMargin = dp(9)
@@ -220,11 +220,11 @@ class MainActivity : Activity(), DeckIO {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = plate(this@MainActivity, 9)
-            setPadding(dp(9), 0, dp(6), 0)
+            background = plate(this@MainActivity, 8)
+            setPadding(dp(8), 0, dp(5), 0)
         }
         led = LedView(this).apply { color = col(LED_OFF) }
-        bar.addView(led, LinearLayout.LayoutParams(dp(16), dp(16)).apply { rightMargin = dp(9) })
+        bar.addView(led, LinearLayout.LayoutParams(dp(14), dp(14)).apply { rightMargin = dp(8) })
 
         wire = etched("—", 10.5f, Monet.etchDim).apply { typeface = Typeface.MONOSPACE }
         bar.addView(wire, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
@@ -235,23 +235,23 @@ class MainActivity : Activity(), DeckIO {
         famPad = GlyphView(this, "pad").apply {
             setOnClickListener { family = 1; haptic(); rebuild() }
         }
-        bar.addView(famMouse, LinearLayout.LayoutParams(dp(30), dp(26)))
-        bar.addView(famPad, LinearLayout.LayoutParams(dp(32), dp(26)).apply { leftMargin = dp(2) })
+        bar.addView(famMouse, LinearLayout.LayoutParams(dp(28), dp(22)))
+        bar.addView(famPad, LinearLayout.LayoutParams(dp(30), dp(22)).apply { leftMargin = dp(2) })
 
         keyGlyph = GlyphView(this, "keys").apply {
             alpha = 0.38f
             setOnClickListener { toggleKeys() }
         }
-        bar.addView(keyGlyph, LinearLayout.LayoutParams(dp(32), dp(26)).apply { leftMargin = dp(6) })
+        bar.addView(keyGlyph, LinearLayout.LayoutParams(dp(30), dp(22)).apply { leftMargin = dp(5) })
 
         tierPips = PipsView(this).apply {
             active = tier
             setOnClickListener { tier = (tier + 1) % 3; haptic(); rebuild() }
         }
-        bar.addView(tierPips, LinearLayout.LayoutParams(dp(46), dp(26)).apply { leftMargin = dp(4) })
+        bar.addView(tierPips, LinearLayout.LayoutParams(dp(44), dp(22)).apply { leftMargin = dp(4) })
 
         val gear = etched("·  ·  ·", 12f, Monet.etchDim).apply {
-            setPadding(dp(10), dp(5), dp(6), dp(5))
+            setPadding(dp(9), dp(3), dp(4), dp(3))
             setOnClickListener { haptic(); togglePanel() }
         }
         bar.addView(gear)
