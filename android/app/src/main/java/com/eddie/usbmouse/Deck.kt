@@ -120,22 +120,71 @@ class LedView(context: Context) : View(context) {
     var color: Int = Color.parseColor("#575B60")
         set(v) { field = v; resolver(); invalidate() }
 
+    /**
+     * Respira mientras se busca al otro lado. Un LED fijo en ambar no distingue
+     * "buscando" de "averiado"; el que late lo dice sin una sola palabra, y es
+     * como lo hace cualquier aparato con una lampara de estado.
+     */
+    var breathing = false
+        set(v) {
+            if (field == v) return
+            field = v
+            if (v) {
+                post(latido)
+            } else {
+                removeCallbacks(latido)
+                k = 1f
+                aplicar()
+                invalidate()
+            }
+        }
+
+    private var fase = 0f
+    private var k = 1f
+
+    // ~30 fps y solo en la cabecera: esto no es la ruta caliente, y la alternativa
+    // (recrear el shader por fotograma) si lo seria. Aqui solo se mueve el alfa,
+    // que multiplica al degradado ya construido.
+    private val latido = object : Runnable {
+        override fun run() {
+            fase += 0.085f
+            k = 0.40f + 0.60f * (0.5f + 0.5f * kotlin.math.sin(fase.toDouble()).toFloat())
+            aplicar()
+            invalidate()
+            postDelayed(this, 33L)
+        }
+    }
+
+    private fun aplicar() {
+        halo.alpha = (255f * k).toInt()
+        aro.alpha = (210f * k).toInt()
+        nucleo.alpha = (255f * (0.45f + 0.55f * k)).toInt()
+    }
+
     // el degradado se arma al cambiar de tamaño o de color, nunca por fotograma
     private fun resolver() {
         aro.color = Monet.alpha(color, 210)
         nucleo.color = color
-        if (width == 0) return
-        val r = width / 2f
-        halo.shader = RadialGradient(
-            r, r, r,
-            intArrayOf(Monet.alpha(color, 110), Monet.alpha(color, 0)),
-            floatArrayOf(0.3f, 1f), Shader.TileMode.CLAMP
-        )
+        if (width > 0) {
+            val r = width / 2f
+            halo.shader = RadialGradient(
+                r, r, r,
+                intArrayOf(Monet.alpha(color, 110), Monet.alpha(color, 0)),
+                floatArrayOf(0.3f, 1f), Shader.TileMode.CLAMP
+            )
+        }
+        // asignar el color pisa el alfa del latido, asi que se vuelve a poner
+        aplicar()
     }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         resolver()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        removeCallbacks(latido)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -182,7 +231,7 @@ interface DeckIO {
     fun text(s: String)
     fun key(name: String)
     fun combo(mods: String, name: String)
-    fun haptic()
+    fun haptic(fuerte: Boolean = false)
     fun note(s: String)
 }
 
@@ -253,7 +302,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
         v.setOnTouchListener { view, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    view.alpha = 0.72f
+                    (view.background as? MetalDrawable)?.sink(true)
                     io.haptic()
                     if (code != null) { if (hold) io.button(code, true) else io.click(code) }
                     if (tag != null) {
@@ -262,7 +311,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    view.alpha = 1f
+                    (view.background as? MetalDrawable)?.sink(false)
                     if (code != null && hold) io.button(code, false)
                     if (tag != null) {
                         io.macro(tag, false)
@@ -283,7 +332,7 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                 stage = (stage + 1) % 3
                 active = stage
                 applySens()
-                io.haptic()
+                io.haptic(fuerte = true)
                 io.note("Nivel ${stage + 1}")
             }
         }

@@ -205,6 +205,19 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
 - **`PowerReceiver`** solo puede abrir la Activity si está concedido "Mostrar sobre otras apps".
   Sin ese permiso falla en silencio, y es correcto que falle en silencio.
 - Cambiar de modo reconstruye `stageHost`, no la Activity: la conexión no debe cortarse.
+  El fundido **quita el anterior en el acto** en vez de desvanecerlo por encima: mientras se
+  desvanecía seguía recibiendo el dedo y mandando órdenes por un modo ya abandonado.
+- **Pulsar una tecla le da la vuelta a la luz, no la vuelve translúcida.** `MetalDrawable.sink()`
+  mueve el filo claro de arriba a abajo e invierte y oscurece el degradado. Era
+  `view.alpha = 0.72f`, que es lo que hace una app, no una tecla.
+- **El bisel de `WindowDrawable` va al revés que el de `MetalDrawable`**: filo de luz al pie y
+  degradado oscuro arriba. Es lo único que distingue un hueco de una pieza montada; si lo
+  igualas, el lector deja de leerse como una ventana.
+- **`LedView.breathing` es un `postDelayed` a 33 ms** y se para en `onDetachedFromWindow`. Solo
+  mueve el alfa de las brochas: recrear el `RadialGradient` por fotograma sí sería ruta caliente.
+  `resolver()` termina llamando a `aplicar()` porque asignar `color` pisa el alfa del latido.
+- **`DeckIO.haptic(fuerte)` tiene dos golpes a propósito**: 9 ms para un clic, 17 ms y más
+  amplitud para el tope de un escalón, que en un ratón de verdad es un diente mecánico.
 
 ## Comandos
 

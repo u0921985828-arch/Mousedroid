@@ -175,4 +175,14 @@ object Monet {
 
     fun alpha(color: Int, a: Int): Int =
         Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
+
+    /** [k] 0 devuelve [a], 1 devuelve [b]. Para teñir un grabado con la luz de la lampara. */
+    fun mix(a: Int, b: Int, k: Float): Int {
+        val t = k.coerceIn(0f, 1f)
+        return Color.rgb(
+            (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+            (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+            (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt()
+        )
+    }
 }

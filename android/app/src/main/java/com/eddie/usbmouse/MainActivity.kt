@@ -74,6 +74,7 @@ class MainActivity : Activity(), DeckIO {
     private lateinit var keys: KeyDeck
     private lateinit var led: LedView
     private lateinit var wire: TextView
+    private lateinit var wireWin: WindowDrawable
     private lateinit var stageHost: FrameLayout
     private lateinit var panel: LinearLayout
     private lateinit var hostIn: EditText
@@ -186,11 +187,18 @@ class MainActivity : Activity(), DeckIO {
         link.combo(mods, name); lastWire = 0; say("$mods+$name")
     }
 
-    override fun haptic() {
+    /**
+     * Dos golpes distintos a proposito. El corto es el chasquido de un boton; el
+     * `fuerte` es el tope de un escalon, que en un raton de verdad es un diente
+     * mecanico y se nota mas en el dedo que un clic.
+     */
+    override fun haptic(fuerte: Boolean) {
         val v = vib ?: return
         if (!v.hasVibrator()) return
-        if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(9, 50))
-        else @Suppress("DEPRECATION") v.vibrate(9)
+        val ms = if (fuerte) 17L else 9L
+        val amp = if (fuerte) 110 else 50
+        if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(ms, amp))
+        else @Suppress("DEPRECATION") v.vibrate(ms)
     }
 
     override fun note(s: String) { lastWire = 0; say(s) }
@@ -202,10 +210,22 @@ class MainActivity : Activity(), DeckIO {
         wire.text = t
     }
 
+    /**
+     * La lampara y el lector son la misma señal, asi que se ponen juntos: el
+     * hueco recoge el color de la lampara y el grabado se tiñe con el. Cuando
+     * se esta buscando, ademas, el LED late.
+     */
+    private fun lamp(c: Int, buscando: Boolean) {
+        led.color = c
+        led.breathing = buscando
+        wireWin.tinte = c
+        wire.setTextColor(Monet.mix(Monet.etchDim, c, 0.42f))
+    }
+
     private fun onStatus(msg: String) {
         val l = link
         val ok = l.isConnected
-        led.color = col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF)
+        lamp(col(if (ok) LED_ON else if (autoConnect) LED_WAIT else LED_OFF), !ok && autoConnect)
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
         // En automatico, ademas, hay que decir CUAL de los dos enlaces ganó.
@@ -277,8 +297,28 @@ class MainActivity : Activity(), DeckIO {
         led = LedView(this).apply { color = col(LED_OFF) }
         bar.addView(led, LinearLayout.LayoutParams(dp(14), dp(14)).apply { rightMargin = dp(8) })
 
-        wire = etched("—", 10.5f, Monet.etchDim).apply { typeface = Typeface.MONOSPACE }
-        bar.addView(wire, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        // El lector no va serigrafiado sobre la chapa: va dentro de un hueco, como
+        // la pantalla de un aparato. Asi el texto parece emitido y no impreso, y
+        // la cabecera deja de ser una fila de cosas sueltas.
+        wireWin = WindowDrawable(dp(5).toFloat())
+        val hueco = FrameLayout(this).apply {
+            background = wireWin
+            setPadding(dp(7), 0, dp(7), 0)
+        }
+        wire = etched("—", 10.5f, Monet.etchDim).apply {
+            typeface = Typeface.MONOSPACE
+            // una sola linea y con puntos suspensivos: el nombre de un aparato
+            // Bluetooth puede ser tan largo como quiera su dueño y no debe
+            // empujar a los glifos fuera de la cabecera
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        hueco.addView(wire, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER_VERTICAL
+        })
+        bar.addView(hueco, LinearLayout.LayoutParams(0, dp(19), 1f).apply {
+            rightMargin = dp(6)
+        })
 
         famMouse = GlyphView(this, "mouse").apply {
             setOnClickListener { family = 0; haptic(); rebuild() }
@@ -306,6 +346,7 @@ class MainActivity : Activity(), DeckIO {
             setOnClickListener { haptic(); togglePanel() }
         }
         bar.addView(gear)
+        lamp(col(LED_OFF), false)
         return bar
     }
 
@@ -316,9 +357,18 @@ class MainActivity : Activity(), DeckIO {
         // faltaba, y por eso apagar la aceleracion duraba hasta el siguiente
         // cambio de modo: al reconstruir se creaba un pad nuevo con el valor viejo
         deck.accel = prefs.getBoolean("accel", true)
+        // La superficie de trabajo no aparece de golpe: se disuelve desde el
+        // chasis. El anterior se quita ya, en vez de fundirlo por encima, porque
+        // mientras se desvanece seguiria recibiendo el dedo y mandando ordenes
+        // por un modo que el usuario acaba de abandonar.
+        val primero = stageHost.childCount == 0
         stageHost.removeAllViews()
-        stageHost.addView(deck.build(family, tier),
-            FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val stage = deck.build(family, tier)
+        stageHost.addView(stage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        if (!primero) {
+            stage.alpha = 0f
+            stage.animate().alpha(1f).setDuration(170).start()
+        }
         famMouse.alpha = if (family == 0) 1f else 0.38f
         famPad.alpha = if (family == 1) 1f else 0.38f
         tierPips.active = tier

@@ -227,13 +227,13 @@ class KeyDeck(private val ctx: Context, private val io: DeckIO) {
         v.setOnTouchListener { view, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    view.alpha = 0.72f
+                    (view.background as? MetalDrawable)?.sink(true)
                     io.haptic()
                     onTap()
                     if (repeat) view.postDelayed(tick, 350L)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    view.alpha = 1f
+                    (view.background as? MetalDrawable)?.sink(false)
                     if (repeat) view.removeCallbacks(tick)
                 }
             }
