@@ -89,34 +89,62 @@ se ignoran con un aviso en `-v`; no rompen la conexión.
 Puerto por defecto 8777. Descubrimiento en UDP 8778, y **solo con `--lan`**: el móvil lanza
 `USBMOUSE? <nonce> <firma>` a broadcast y el PC responde `USBMOUSE:<puerto> <firma>`.
 
-## Emparejado del cable
+## Emparejado y sesión del cable
 
-Por ese socket viajan pulsaciones de teclado, o sea **ejecución de código** en el PC. Sin
-autenticar, cualquiera en la misma Wi-Fi lo abría con `nc` y escribía lo que quisiera, y por el
-túnel de adb podía hacerlo cualquier app del móvil con solo permiso de `INTERNET`.
+Por ese socket viajan pulsaciones de teclado, o sea **ejecución de código** en el PC, y además
+**tu texto**: contraseñas incluidas. Así que no basta con saber quién llama; hace falta que nadie
+por el medio pueda leer ni colar nada.
 
 El código son 12 símbolos (60 bits) de un alfabeto sin `I`, `L`, `O` ni `U`. Vive en
-`server/usbmouse-code.txt` (permisos 600) y **no viaja nunca por la red**: cada lado firma el
-número aleatorio del otro con HMAC-SHA256.
+`server/usbmouse-code.txt`, que **nace** con permisos 600 (`os.open`, no `open` + `chmod`: con la
+umask había una ventana con el secreto a la vista) y **no se escribe nunca en el registro** —
+`install-autostart.bat` arranca con `--log`.
 
 ```
-PC    -> móvil   U1 <nonceS>
-móvil -> PC      A <hmac(código, "S:nonceS:nonceC")> <nonceC>
-PC    -> móvil   B <hmac(código, "C:nonceC:nonceS")>
+PC    -> móvil   U2 <nonceS>
+móvil -> PC      A <hmac(K, "S:nonceS:nonceC")> <nonceC>
+PC    -> móvil   B <hmac(K, "C:nonceC:nonceS")>
 ```
 
-- **Se comprueban los dos**, no solo el móvil. Si el móvil no verificara al PC, quien conteste
-  antes al sondeo UDP se lleva la conexión y con ella todo lo que se teclee.
-- **El sondeo UDP también va firmado.** Si el PC contestara con una firma a cualquiera que
-  pregunte, sería un oráculo: se le pide una vez y se rompe el código sin volver a tocar la red.
-- Por USB el código se lo pasa el servidor al móvil al abrir la app (`am start -e code`), así
-  que no hay que teclear nada; ese canal ya está autorizado por la depuración USB. Por Wi-Fi se
-  escribe una vez en los ajustes.
+`K` sale del código por un **KDF lento**: 200 000 vueltas de HMAC-SHA256 (0,36 s en Python, y se
+cachea). Un código de 60 bits usado en crudo como clave HMAC se rompe a martillazos; estirado, no.
+
+**Todo lo que viene después va cifrado y firmado**, con claves de sesión sacadas del apretón —no
+del código— y distintas por sentido:
+
+```
+<orden 8 hex> <criptograma hex> <firma 16 bytes hex>
+```
+
+Flujo con HMAC-SHA256 como PRF (bloque *i* = `HMAC(k_enc, orden ‖ i)`), y encima un HMAC aparte
+sobre el criptograma: **cifrar y luego firmar**, en ese orden. El número de orden es estricto —
+repetir una línea vieja es volver a pulsar esa tecla.
+
+Esto es lo que cierra al hombre en medio. Con solo el saludo autenticado, quien se colara entre
+los dos leía el texto de `K` tal cual y podía inyectar sus propias líneas sin saber el código.
+
+- **Se comprueban los dos**, no solo el móvil.
+- **El sondeo UDP no lleva firmas, a propósito.** Firmarlo era regalar un verificador del código
+  para romperlo sin límite y sin volver a tocar la red; firmar la respuesta no servía, porque la
+  firma no ataba la IP y un intermediario reenviaba el sondeo al PC de verdad para devolver su
+  respuesta válida desde su propia dirección. Es una **pista**: se prueban todas las direcciones
+  que contesten y decide el apretón.
+- **Por USB viaja un vale de un solo uso, no el código.** Los argumentos de `adb` los lee
+  cualquier usuario del PC en `/proc/*/cmdline`. El vale caduca en dos minutos, sirve una vez, y
+  con él el móvil recoge el código de verdad ya dentro de la sesión cifrada.
+- **El móvil pregunta siempre antes de emparejarse.** La Activity es `exported`, así que
+  cualquier app sin un solo permiso podía mandar el extra `code`, emparejar el móvil con *su*
+  código, escuchar en `127.0.0.1:8777` y recoger todo lo tecleado. Una app no puede pulsar ese
+  botón por ti.
+- **Dos cupos de conexión**: uno ancho y con plazo corto para los que aún no se han identificado,
+  y otro de cuatro para los admitidos. Con un solo cupo, cuatro sockets callados dejaban fuera al
+  móvil de verdad.
 - Cinco fallos desde una IP y se bloquea un minuto, más medio segundo de castigo por intento.
-  Con eso 60 bits son inalcanzables aunque se pruebe sin parar.
+  **127.0.0.1 nunca se bloquea**: por el túnel de adb todo viene de ahí, así que bloquearla no
+  para a un atacante local (ya está dentro) y en cambio deja fuera al móvil.
 
-El servidor suelta solo lo que quedara pulsado al cortarse la línea, teclas incluidas
-(`Keys.release_all`), y los modificadores de un atajo se sueltan en orden inverso.
+**Lo que sigue sin cubrir:** por Bluetooth HID la seguridad es la del emparejado de Bluetooth, no
+la de aquí. Y `allowBackup` está en `false` desde que hay un secreto guardado.
 
 ## Reglas de la ruta caliente
 
@@ -264,6 +292,17 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   cursor y el ratón no se movía hasta reconectar.
 - **`readline` va con tope y las conexiones también.** Sin el tope, un cliente que no mandara
   nunca un fin de línea tumbaba el servidor por memoria.
+- **`BtHid.bomba` es `@Volatile` y se asigna ANTES de `start()`.** El hilo nuevo lee `bomba` nada
+  más nacer para saber si sigue siendo el titular; con la asignación después del arranque podía
+  leer la vieja y morirse de inmediato — exactamente el puntero congelado que venía a arreglar.
+- **`STATE_DISCONNECTED` se filtra por aparato.** Al intruso recién rechazado le llegaba su
+  desconexión y se llevaba por delante la sesión legítima.
+- **El primero que empareja se queda como el elegido** (`onPrimero`). Sin eso la lista blanca no
+  entraba en juego nunca: `btmac` solo lo escribía el diálogo de «Elegir aparato».
+- **`BLUETOOTH_ADVERTISE` se pide al hacerse visible, no al arrancar.** Exigirlo de entrada
+  dejaba el Bluetooth entero muerto en automático —donde no se usa— si el usuario lo denegaba.
+- **`onRequestPermissionsResult` mira todos los resultados**, no `res[0]`: con una petición de
+  dos, daba por concedido lo denegado y volvía a preguntar.
 
 ## Comandos
 

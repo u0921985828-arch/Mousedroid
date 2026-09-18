@@ -106,6 +106,12 @@ class MainActivity : Activity(), DeckIO {
     /** El codigo de emparejado del PC, ya normalizado. Vacio = no hay. */
     private val code: String get() = prefs.getString("code", "") ?: ""
 
+    /**
+     * Vale de un solo uso recien aceptado. No se guarda en disco a proposito:
+     * sirve para una conexion, por la que llega el codigo de verdad, y ahi muere.
+     */
+    @Volatile private var vale: String? = null
+
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -119,6 +125,13 @@ class MainActivity : Activity(), DeckIO {
         tier = prefs.getInt("tier", 1)
 
         usb = MouseClient { msg -> runOnUiThread { onStatus(msg) } }
+        usb.onCodigo = { real ->
+            // Llega dentro de la sesion cifrada, a cambio del vale. El vale ya
+            // esta gastado en el PC, asi que aqui tambien se tira.
+            vale = null
+            prefs.edit().putString("code", real).apply()
+            runOnUiThread { say("Emparejado con el PC") }
+        }
         // migracion del interruptor viejo de dos estados
         modo = prefs.getInt("modo", if (prefs.getBoolean("bt", false)) BLUETOOTH else AUTO)
         deck = Deck(this, this)
@@ -236,7 +249,7 @@ class MainActivity : Activity(), DeckIO {
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
         // En automatico, ademas, hay que decir CUAL de los dos enlaces ganó.
-        if (!ok && modo != BLUETOOTH && code.isEmpty()) {
+        if (!ok && modo != BLUETOOTH && code.isEmpty() && vale == null) {
             // Sin esto el lector decia "Esperando al PC..." para siempre y no
             // habia forma de saber que lo que faltaba era el codigo.
             lastWire = 0
@@ -642,21 +655,23 @@ class MainActivity : Activity(), DeckIO {
             if (modo == BLUETOOTH) say("Bluetooth HID pide Android 9")
             return
         }
-        // Los dos, y no solo CONNECT: hacerse visible es "anunciarse", que desde
-        // Android 12 es ADVERTISE. Sin el, el dialogo de visibilidad lanzaba
-        // SecurityException, el catch se la tragaba y el emparejado inicial no
-        // podia completarse nunca.
-        if (Build.VERSION.SDK_INT >= 31) {
-            val faltan = arrayOf(
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_ADVERTISE
-            ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-            if (faltan.isNotEmpty()) {
-                requestPermissions(faltan.toTypedArray(), 7)
-                return
-            }
+        // Solo CONNECT es imprescindible para anunciarse y hablar. ADVERTISE hace
+        // falta unicamente para el dialogo de visibilidad, asi que se pide ahi y
+        // no aqui: exigirlo de entrada dejaba el Bluetooth entero muerto en modo
+        // automatico, donde no se usa, si el usuario lo denegaba.
+        if (Build.VERSION.SDK_INT >= 31 &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 7)
+            return
         }
         val b = bt ?: BtHid(this) { msg -> runOnUiThread { onStatus(msg) } }.also { bt = it }
+        b.onPrimero = { mac ->
+            // El primero que empareja se queda como el elegido, y a partir de
+            // ahi no entra nadie mas.
+            runOnUiThread { prefs.edit().putString("btmac", mac).apply() }
+        }
         val mac = prefs.getString("btmac", null)
         b.start(mac)
         // Registrar el perfil anuncia el servicio pero NO hace visible al movil:
@@ -668,6 +683,16 @@ class MainActivity : Activity(), DeckIO {
 
     /** Cinco minutos de visibilidad para que el anfitrion pueda emparejar. */
     private fun hacerseVisible() {
+        // Hacerse visible es "anunciarse", y desde Android 12 eso es ADVERTISE y
+        // no CONNECT. Sin el, el dialogo del sistema lanzaba SecurityException,
+        // el catch se la tragaba y el emparejado inicial no se completaba nunca.
+        if (Build.VERSION.SDK_INT >= 31 &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_ADVERTISE), 8)
+            return
+        }
         try {
             startActivity(
                 Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
@@ -682,10 +707,14 @@ class MainActivity : Activity(), DeckIO {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
         super.onRequestPermissionsResult(code, perms, res)
-        if (code == 7) {
-            if (res.isNotEmpty() && res[0] == PackageManager.PERMISSION_GRANTED)
-                arrancarBt(pedirVisible = modo == BLUETOOTH)
-            else say("Sin permiso de Bluetooth")
+        // Todos, no solo el primero: con una peticion de dos, mirar res[0] daba
+        // por concedido lo que se habia denegado y se volvia a preguntar.
+        val todos = res.isNotEmpty() && res.all { it == PackageManager.PERMISSION_GRANTED }
+        when (code) {
+            7 -> if (todos) arrancarBt(pedirVisible = modo == BLUETOOTH)
+                 else say("Sin permiso de Bluetooth")
+            8 -> if (todos) hacerseVisible()
+                 else say("Sin permiso para hacerme visible")
         }
     }
 
@@ -723,7 +752,7 @@ class MainActivity : Activity(), DeckIO {
         autoRunning = true
         Thread {
             while (autoRunning) {
-                val pin = code
+                val pin = code.ifEmpty { vale ?: "" }
                 if (autoConnect && modo != BLUETOOTH && !usb.isConnected && pin.isNotEmpty()) {
                     val typed = prefs.getString("host", "auto") ?: "auto"
                     val port = prefs.getInt("port", 8777)
@@ -731,8 +760,14 @@ class MainActivity : Activity(), DeckIO {
                         usb.connect("127.0.0.1", port, pin)
                         Thread.sleep(600)
                         if (!usb.isConnected) {
-                            val found = Discovery.find(pin)
-                            if (found != null) usb.connect(found.first, found.second, pin)
+                            // El sondeo es una pista, no una decision: se prueban
+                            // todos los que contesten y el apreton descarta a
+                            // quien no sepa el codigo.
+                            for ((ip, p2) in Discovery.find()) {
+                                if (usb.isConnected) break
+                                usb.connect(ip, p2, pin)
+                                Thread.sleep(500)
+                            }
                         }
                     } else {
                         usb.connect(typed, port, pin)
@@ -750,18 +785,37 @@ class MainActivity : Activity(), DeckIO {
 
     /**
      * El servidor pasa su codigo por el propio cable al abrir la app
-     * (`am start -e code ...`), asi que por USB no hay que teclear nada. El
-     * canal ya esta autorizado: para llegar ahi el usuario ha tenido que
-     * aceptar la depuracion USB de ese PC.
+     * (`am start -e code ...`), asi que por USB no hay que teclear nada.
+     *
+     * PERO SE PREGUNTA SIEMPRE. Esta Activity es `exported`, o sea que cualquier
+     * app del movil —sin un solo permiso— podia mandar este extra, emparejar el
+     * movil con SU codigo, ponerse a escuchar en 127.0.0.1:8777 y recoger todo
+     * lo que se teclease. Era justo la amenaza que el emparejado venia a cerrar.
+     * Una app no puede pulsar este boton por ti.
      */
     private fun tomarCodigo(i: Intent?) {
         val crudo = try { i?.getStringExtra("code") } catch (_: Exception) { null } ?: return
-        val c = Pairing.normal(crudo)
-        if (c.length != Pairing.LARGO) return
-        if (c == code) return
-        prefs.edit().putString("code", c).apply()
-        usb.close()
-        say("Emparejado con el PC")
+        // Se consume: si no, cada vuelta a la app volveria a preguntar.
+        try { i?.removeExtra("code") } catch (_: Exception) {}
+        val limpio = crudo.trim()
+        val esVale = Pairing.esVale(limpio)
+        val c = if (esVale) limpio else Pairing.normal(limpio)
+        if (!esVale && c.length != Pairing.LARGO) return
+        if (!esVale && c == code) return
+        val aviso = "Algo pide emparejar este m\u00f3vil con un PC.\n\n" +
+            "Acepta solo si acabas de enchufar el cable. Quien tenga el " +
+            "emparejado recibe todo lo que escribas aqu\u00ed."
+        AlertDialog.Builder(this)
+            .setTitle("\u00bfEmparejar con un PC?")
+            .setMessage(aviso)
+            .setPositiveButton("Emparejar") { _, _ ->
+                if (esVale) vale = c else prefs.edit().putString("code", c).apply()
+                usb.close()
+                say("Emparejando\u2026")
+                startAutoLoop()
+            }
+            .setNegativeButton("No", null)
+            .show()
     }
 
     override fun onResume() {

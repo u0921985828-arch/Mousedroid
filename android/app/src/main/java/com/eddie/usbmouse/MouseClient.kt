@@ -14,10 +14,19 @@ import kotlin.math.abs
  */
 class MouseClient(private val onStatus: (String) -> Unit) : Transport {
 
+    /**
+     * El codigo de verdad, cuando se ha entrado con un vale. Llega dentro de la
+     * sesion ya cifrada: asi el codigo no viaja nunca como argumento de `adb`,
+     * que cualquier usuario del PC puede leer en /proc.
+     */
+    var onCodigo: ((String) -> Unit)? = null
+
     private val connected = AtomicBoolean(false)
     private val busy = AtomicBoolean(false)
     private var socket: Socket? = null
     private var out: BufferedOutputStream? = null
+    /** Las claves de esta conexion. Sin ella no sale ni un byte de protocolo. */
+    @Volatile private var sesion: Pairing.Sesion? = null
     private var worker: Thread? = null
 
     private val urgent = LinkedBlockingQueue<String>(128)
@@ -57,12 +66,23 @@ class MouseClient(private val onStatus: (String) -> Unit) : Transport {
                 // colgados para siempre.
                 s.soTimeout = 5000
                 val o = BufferedOutputStream(s.getOutputStream(), 512)
-                if (!Pairing.handshake(s.getInputStream(), o, code)) {
+                val ses = Pairing.handshake(s.getInputStream(), o, code)
+                if (ses == null) {
                     onStatus("Código rechazado por $host")
                     try { s.close() } catch (_: Exception) {}
                     return@Thread
                 }
+                if (Pairing.esVale(code)) {
+                    // Solo al enrolar: es la unica vez que el PC dice algo.
+                    val linea = Pairing.linea(s.getInputStream())
+                    val txt = if (linea != null) ses.abridor.abrir(linea) else null
+                    if (txt != null && txt.startsWith("#CODE ")) {
+                        val real = Pairing.normal(txt.substring(6))
+                        if (real.length == Pairing.LARGO) onCodigo?.invoke(real)
+                    }
+                }
                 s.soTimeout = 0
+                sesion = ses
                 socket = s
                 out = o
                 connected.set(true)
@@ -113,14 +133,28 @@ class MouseClient(private val onStatus: (String) -> Unit) : Transport {
         }
     }
 
-    // UTF-8 y no ASCII: el texto de K lleva eñes y signos de apertura. Para todo
-    // lo demas son los mismos bytes, asi que el servidor antiguo no nota nada.
+    /**
+     * Cierra el sobre y lo manda. Nada sale en claro: sin esto, quien estuviera
+     * escuchando la Wi-Fi leia el texto de `K` tal cual —contrasenas incluidas—
+     * y podia colar sus propias lineas sin saber el codigo, porque solo se
+     * autenticaba el saludo y no lo que venia detras.
+     */
+    private fun enviar(pt: ByteArray, n: Int) {
+        val c = sesion?.cerrador ?: return
+        val largo = c.cerrar(pt, n)
+        if (largo > 0) out?.write(c.sobre, 0, largo)
+    }
+
+    // UTF-8 y no ASCII: el texto de K lleva eñes y signos de apertura.
     private fun write(s: String) {
-        out?.write(s.toByteArray(Charsets.UTF_8))
+        // El fin de linea lo pone el sobre; dentro estorba.
+        val b = s.trimEnd('\n', '\r').toByteArray(Charsets.UTF_8)
+        if (b.size <= Pairing.MAX_LINEA) enviar(b, b.size)
     }
 
     // Buffer reutilizado: emitir un movimiento no asigna nada, asi no alimentamos
-    // al recolector de basura justo mientras el dedo se mueve.
+    // al recolector de basura justo mientras el dedo se mueve. El sobre tambien
+    // va sin asignaciones, que si no daria igual todo esto.
     private val buf = ByteArray(48)
 
     private fun emit(op: Char, x: Float, y: Float) {
@@ -129,8 +163,7 @@ class MouseClient(private val onStatus: (String) -> Unit) : Transport {
         n = putFixed(n, x)
         buf[n++] = ','.code.toByte()
         n = putFixed(n, y)
-        buf[n++] = '\n'.code.toByte()
-        out?.write(buf, 0, n)
+        enviar(buf, n)
     }
 
     /** Escribe el float con dos decimales sin crear String. */
@@ -208,6 +241,9 @@ class MouseClient(private val onStatus: (String) -> Unit) : Transport {
         try { socket?.close() } catch (_: Exception) {}
         socket = null
         out = null
+        // Las claves mueren con la conexion: la siguiente trae numeros nuevos y
+        // los numeros de orden vuelven a empezar.
+        sesion = null
         urgent.clear()
     }
 }

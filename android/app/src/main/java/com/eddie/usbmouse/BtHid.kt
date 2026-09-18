@@ -102,8 +102,14 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
     private var hid: BluetoothHidDevice? = null
     private var host: BluetoothDevice? = null
     private var deseado: String? = null          // MAC a la que conectar
+    /** Aviso del primer aparato que engancha, para fijarlo como el elegido. */
+    var onPrimero: ((String) -> Unit)? = null
     private val exec = Executors.newSingleThreadExecutor()
-    private var bomba: Thread? = null
+    // Volatil y asignada antes de start(): el hilo nuevo lee `bomba` nada mas
+    // nacer para saber si sigue siendo el titular, y si la asignacion va despues
+    // del arranque puede leer la vieja y morirse de inmediato. Era exactamente
+    // el puntero congelado que esto venia a arreglar.
+    @Volatile private var bomba: Thread? = null
     @Volatile private var vivo = false
 
     override val isConnected: Boolean get() = conectado.get()
@@ -180,6 +186,11 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
                         return
                     }
                     host = device
+                    // Si no habia ninguno elegido, el primero que engancha se
+                    // queda con el sitio. Sin esto la lista blanca no entraba en
+                    // juego nunca: `btmac` solo lo escribia el dialogo de
+                    // "Elegir aparato", que casi nadie abre.
+                    if (m == null && device != null) onPrimero?.invoke(device.address)
                     nombreHost = try { device?.name } catch (_: Throwable) { null }
                     // Lo encolado mientras no habia nadie se tira: si no, al
                     // conectar salia de golpe una rafaga de hasta 128 clics y
@@ -190,6 +201,11 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
                     onStatus("Conectado - ${nombreHost ?: "?"}")
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
+                    // Solo si se va el que estaba. Sin este filtro, al intruso
+                    // que acabamos de rechazar le llegaba su STATE_DISCONNECTED
+                    // y se llevaba por delante la sesion legitima.
+                    val h = host
+                    if (h != null && device != null && device.address != h.address) return
                     conectado.set(false)
                     host = null
                     onStatus("Desconectado")
@@ -229,7 +245,7 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
         }
         vivo = true
         lateinit var yo: Thread
-        bomba = Thread {
+        val nueva = Thread {
             while (vivo && conectado.get() && bomba === yo) {
                 try {
                     while (true) (urgentes.poll() ?: break).run()
@@ -248,7 +264,11 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
             // Solo el hilo que sigue siendo el titular apaga la bandera: si no,
             // un hilo viejo agonizando apagaba la bomba del nuevo.
             if (bomba === yo) vivo = false
-        }.also { yo = it }.apply { isDaemon = true; start() }
+        }
+        yo = nueva
+        nueva.isDaemon = true
+        bomba = nueva      // primero el titular, y solo despues a correr
+        nueva.start()
     }
 
     /** Parte entera acotada a lo que cabe en un byte con signo. */

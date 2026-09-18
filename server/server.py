@@ -254,10 +254,11 @@ class Keys:
 
 
 def handle(conn, addr, verbose=False):
-    # Tope de conexiones: sin el, cualquiera podia abrir miles de sockets y
-    # dejar un hilo colgado en cada uno.
-    if not CONEXIONES.acquire(blocking=False):
-        log("[!] Demasiadas conexiones a la vez; rechazo", addr[0])
+    # Dos cupos, y no uno: el de los que aun no se han identificado se suelta en
+    # cuanto termina el apreton. Con un solo cupo, cuatro sockets callados
+    # dejaban fuera al movil de verdad mientras se les agotaba el plazo -- un
+    # DoS que antes no existia.
+    if not PENDIENTES.acquire(blocking=False):
         try:
             conn.close()
         except Exception:
@@ -266,16 +267,31 @@ def handle(conn, addr, verbose=False):
     cur = None
     keys = None
     contado = False
+    pendiente = True
+    admitido = False
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     try:
         with conn.makefile("rb") as f:
             # Nada de lo que venga detras se toca hasta que el otro lado
             # demuestre que conoce el codigo.
-            conn.settimeout(8)
-            if not handshake(conn, f, addr):
+            conn.settimeout(5)
+            trato = handshake(conn, f, addr)
+            PENDIENTES.release()
+            pendiente = False
+            if trato is None:
                 log("[-] Conexion rechazada", addr[0])
                 return
+            salida, entrada, enrolando = trato
+            if not CONEXIONES.acquire(blocking=False):
+                log("[!] Demasiadas conexiones a la vez; rechazo", addr[0])
+                return
+            admitido = True
             conn.settimeout(None)
+            if enrolando:
+                # El codigo de verdad viaja aqui, ya dentro de la sesion cifrada,
+                # y no como argumento de adb a la vista de todo el mundo.
+                conn.sendall(salida.cerrar("#CODE " + CODE).encode("ascii"))
+                log("    codigo entregado al movil por el cable")
             cur = Cursor()
             keys = Keys()
             log("[+] Movil conectado", addr[0])
@@ -291,8 +307,15 @@ def handle(conn, addr, verbose=False):
                 if not raw.endswith(b"\n") and len(raw) >= MAX_LINEA:
                     log("[!] Linea demasiado larga desde", addr[0], "- cierro")
                     break
-                # solo el fin de linea: en K los espacios de los extremos son texto
-                line = raw.rstrip(b"\r\n").decode("utf-8", "replace")
+                sobre = raw.rstrip(b"\r\n").decode("ascii", "replace")
+                if not sobre:
+                    continue
+                # Firma y numero de orden antes que nada: una linea que no cuadre
+                # es alguien colandose, no ruido. Se corta y punto.
+                line = entrada.abrir(sobre)
+                if line is None:
+                    log("[!] Linea manipulada o fuera de orden desde", addr[0], "- cierro")
+                    break
                 if not line:
                     continue
                 op, arg = line[0], line[1:]
@@ -345,7 +368,10 @@ def handle(conn, addr, verbose=False):
         if contado:
             log("[-] Movil desconectado")
             contar(conectados=-1)
-        CONEXIONES.release()
+        if pendiente:
+            PENDIENTES.release()
+        if admitido:
+            CONEXIONES.release()
 
 
 # ---------------------------------------------------------------- adb
@@ -406,9 +432,13 @@ ABC = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 LARGO_CODIGO = 12          # 12 de 32 simbolos = 60 bits
 CODE = ""
 
-MAX_LINEA = 4096           # una linea de protocolo no llega ni a 64 bytes
+MAX_LINEA = 4096           # el sobre cifrado, en hexadecimal
+MAX_CLARO = 1024           # la linea de protocolo de dentro
 MAX_CONEXIONES = 4
 CONEXIONES = threading.Semaphore(MAX_CONEXIONES)
+# Los que todavia no se han identificado van por su propio cupo, mas ancho y con
+# un plazo corto, para que no puedan ocupar el sitio de una conexion buena.
+PENDIENTES = threading.Semaphore(24)
 
 # Freno contra la fuerza bruta en linea: cinco fallos y esa IP se queda fuera
 # un minuto. Con eso, 60 bits son inalcanzables aunque se pruebe sin parar.
@@ -430,12 +460,102 @@ def bonito(code):
     return "-".join(code[i:i + 4] for i in range(0, len(code), 4))
 
 
-def firma(msg):
-    return hmac.new(CODE.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+KDF_VUELTAS = 200000
+KDF_SAL = b"usbmouse-kdf-v1"
+_CLAVES = {}
+_CLAVES_LOCK = threading.Lock()
+
+
+def clave(code):
+    """
+    Estira el codigo hasta una clave. 60 bits usados en crudo como clave HMAC se
+    rompen a martillazos; con 200.000 vueltas por prueba, no.
+
+    Se cachea porque tarda a proposito, y el movil reintenta en bucle.
+    """
+    with _CLAVES_LOCK:
+        k = _CLAVES.get(code)
+        if k is not None:
+            return k
+    k = code.encode("utf-8") + KDF_SAL
+    for _ in range(KDF_VUELTAS):
+        k = hmac.new(k, KDF_SAL, hashlib.sha256).digest()
+    with _CLAVES_LOCK:
+        _CLAVES[code] = k
+    return k
+
+
+def mac(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+class Sobre:
+    """
+    Cifra y firma cada linea con su numero de orden.
+
+    Flujo hecho con HMAC-SHA256 como funcion pseudoaleatoria (bloque i =
+    HMAC(k, orden || i)) y un HMAC aparte encima del criptograma: cifrar y luego
+    firmar, en ese orden. Claves distintas por sentido, asi que una linea del PC
+    no se puede devolver como si viniera del movil.
+
+    Esto es lo que cierra al hombre en medio. Antes solo se autenticaba el
+    saludo: quien se colara entre los dos leia el texto de `K` tal cual y podia
+    inyectar sus propias lineas sin saber el codigo.
+    """
+
+    def __init__(self, k_enc, k_mac):
+        self.k_enc = k_enc
+        self.k_mac = k_mac
+        self.orden = 0
+
+    def _flujo(self, orden, n):
+        out = bytearray()
+        bloque = 0
+        while len(out) < n:
+            ctr = orden.to_bytes(4, "big") + bytes([bloque])
+            out += hmac.new(self.k_enc, ctr, hashlib.sha256).digest()
+            bloque += 1
+        return out[:n]
+
+    def cerrar(self, texto):
+        pt = texto.encode("utf-8")
+        o = self.orden
+        self.orden += 1
+        ct = bytes(a ^ b for a, b in zip(pt, self._flujo(o, len(pt))))
+        t = hmac.new(self.k_mac, o.to_bytes(4, "big") + ct, hashlib.sha256).digest()[:16]
+        return "%08x %s %s\n" % (o, ct.hex(), t.hex())
+
+    def abrir(self, linea):
+        """Texto, o None si viene falsa, repetida o fuera de orden."""
+        p = linea.strip().split(" ")
+        if len(p) != 3:
+            return None
+        try:
+            o = int(p[0], 16)
+            ct = bytes.fromhex(p[1])
+            t = bytes.fromhex(p[2])
+        except ValueError:
+            return None
+        # Estricto: repetir una linea vieja es volver a pulsar esa tecla.
+        if o != self.orden or len(ct) > MAX_CLARO or len(t) != 16:
+            return None
+        esperado = hmac.new(self.k_mac, o.to_bytes(4, "big") + ct, hashlib.sha256).digest()[:16]
+        if not hmac.compare_digest(t, esperado):
+            return None
+        self.orden += 1
+        return bytes(a ^ b for a, b in zip(ct, self._flujo(o, len(ct)))).decode("utf-8", "replace")
 
 
 def fichero_codigo():
     return os.path.join(carpeta(), "usbmouse-code.txt")
+
+
+def apretar(ruta):
+    """Solo el dueno: en un PC compartido el codigo es la llave de todo."""
+    try:
+        os.chmod(ruta, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception:
+        pass
 
 
 def cargar_codigo(forzado=None, nuevo=False):
@@ -452,18 +572,20 @@ def cargar_codigo(forzado=None, nuevo=False):
             with open(ruta, "r", encoding="utf-8") as f:
                 c = normal(f.read())
             if len(c) == LARGO_CODIGO:
+                # Se aprieta tambien al leer: un fichero que ya existiera con
+                # permisos flojos no se arreglaba nunca.
+                apretar(ruta)
                 return c
         except Exception:
             pass
     c = "".join(secrets.choice(ABC) for _ in range(LARGO_CODIGO))
     try:
-        with open(ruta, "w", encoding="utf-8") as f:
+        # Nace ya con 600: con open() normal lo creaba la umask (0644) y solo
+        # despues se apretaba, dejando una ventana con el secreto a la vista.
+        fd = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(bonito(c) + "\n")
-        # Solo el dueno: en un PC compartido el codigo es la llave de todo.
-        try:
-            os.chmod(ruta, stat.S_IRUSR | stat.S_IWUSR)
-        except Exception:
-            pass
+        apretar(ruta)
     except Exception as e:
         log("[!] No pude guardar el codigo:", e, "(se pedira otro al reiniciar)")
     return c
@@ -476,6 +598,11 @@ def bloqueada(ip):
 
 
 def anotar_fallo(ip):
+    # Por el tunel de adb TODO viene de 127.0.0.1, asi que bloquear esa IP no
+    # para a un atacante local (ya esta dentro) y en cambio deja fuera al movil
+    # de verdad. El castigo de medio segundo si se aplica siempre.
+    if ip in ("127.0.0.1", "::1"):
+        return
     with FALLOS_LOCK:
         n, hasta = FALLOS.get(ip, (0, 0.0))
         n += 1
@@ -500,36 +627,85 @@ def leer_linea(f, maximo=512):
     return raw.decode("utf-8", "replace").strip()
 
 
+# Vale de un solo uso para enrolar por cable. Existe para no pasar el codigo de
+# verdad como argumento de `adb`, que cualquier usuario del PC puede leer en
+# /proc/*/cmdline; este caduca en dos minutos, sirve una vez y no vale para nada
+# despues.
+VALE = {"valor": None, "caduca": 0.0}
+VALE_LOCK = threading.Lock()
+
+
+def nuevo_vale():
+    v = secrets.token_hex(8)
+    with VALE_LOCK:
+        VALE["valor"] = v
+        VALE["caduca"] = time.time() + 120
+    return v
+
+
+def gastar_vale(v):
+    with VALE_LOCK:
+        if VALE["valor"] and hmac.compare_digest(v, VALE["valor"]) \
+                and time.time() < VALE["caduca"]:
+            VALE["valor"] = None
+            return True
+    return False
+
+
 def handshake(conn, f, addr):
     """
-    Apreton mutuo. True solo si los dos lados prueban que conocen el codigo.
+    Apreton mutuo. Devuelve (Sobre salida, Sobre entrada, enrolando) o None.
 
-        PC    -> movil   U1 <nonceS>
-        movil -> PC      A <hmac(S:nonceS:nonceC)> <nonceC>
-        PC    -> movil   B <hmac(C:nonceC:nonceS)>
+        PC    -> movil   U2 <nonceS>
+        movil -> PC      A <hmac(K, "S:nonceS:nonceC")> <nonceC>
+        PC    -> movil   B <hmac(K, "C:nonceC:nonceS")>
+
+    K sale del KDF sobre el codigo, o sobre el vale de un solo uso si el movil
+    todavia no tiene codigo. En ese caso se le manda dentro de la sesion ya
+    cifrada, que para eso esta.
     """
     ip = addr[0]
     if bloqueada(ip):
-        return False
+        return None
     nonce_s = secrets.token_hex(16)
-    conn.sendall(("U1 %s\n" % nonce_s).encode("ascii"))
+    conn.sendall(("U2 %s\n" % nonce_s).encode("ascii"))
     linea = leer_linea(f)
     if not linea:
-        return False
+        return None
     p = linea.split(" ")
     if len(p) != 3 or p[0] != "A" or len(p[2]) != 32:
         anotar_fallo(ip)
-        return False
+        return None
     nonce_c = p[2]
-    if not hmac.compare_digest(p[1], firma("S:%s:%s" % (nonce_s, nonce_c))):
-        # medio segundo de castigo: convierte cualquier barrido en inviable
-        time.sleep(0.5)
-        anotar_fallo(ip)
-        log("[!] Codigo incorrecto desde", ip)
-        return False
-    conn.sendall(("B %s\n" % firma("C:%s:%s" % (nonce_c, nonce_s))).encode("ascii"))
+    msg = "S:%s:%s" % (nonce_s, nonce_c)
+
+    k = clave(CODE)
+    enrolando = False
+    if not hmac.compare_digest(p[1], mac(k, msg).hex()):
+        # Puede venir con el vale en vez del codigo. Se prueban los dos y solo
+        # despues se decide, para no dar pistas por el tiempo de respuesta.
+        with VALE_LOCK:
+            v = VALE["valor"] if time.time() < VALE["caduca"] else None
+        ok_vale = False
+        if v:
+            kv = clave(v)
+            if hmac.compare_digest(p[1], mac(kv, msg).hex()) and gastar_vale(v):
+                k, enrolando, ok_vale = kv, True, True
+        if not ok_vale:
+            # medio segundo de castigo: convierte cualquier barrido en inviable
+            time.sleep(0.5)
+            anotar_fallo(ip)
+            log("[!] Codigo incorrecto desde", ip)
+            return None
+
+    conn.sendall(("B %s\n" % mac(k, "C:%s:%s" % (nonce_c, nonce_s)).hex()).encode("ascii"))
     limpiar_fallos(ip)
-    return True
+
+    # Claves de sesion: del apreton, no del codigo, y distintas por sentido.
+    base = mac(k, "sess:%s:%s" % (nonce_s, nonce_c))
+    salida = Sobre(mac(base, "s2c-enc"), mac(base, "s2c-mac"))
+    entrada = Sobre(mac(base, "c2s-enc"), mac(base, "c2s-mac"))
+    return salida, entrada, enrolando
 
 
 def numero(txt):
@@ -598,11 +774,12 @@ def prepare(exe, serial, port, launch, wake, install=True):
             log("    (la app no esta y no hay APK: compila con 'gradlew assembleDebug'")
             log("     o deja un UsbMouse.apk junto a este servidor)")
     if launch:
-        # El codigo se le pasa al movil por el propio cable, asi que por USB no
-        # hay que teclear nada. El canal ya esta autorizado: para llegar aqui el
-        # usuario ha tenido que aceptar la depuracion USB de este PC.
+        # Un VALE de un solo uso, no el codigo. Los argumentos de adb los puede
+        # leer cualquier usuario del PC en /proc/*/cmdline; este caduca en dos
+        # minutos, sirve una vez y con el el movil recoge el codigo de verdad ya
+        # dentro de la sesion cifrada.
         r = adb(exe, "-s", serial, "shell", "am", "start", "-n", f"{PACKAGE}/.MainActivity",
-                "-e", "code", CODE)
+                "-e", "code", nuevo_vale())
         if r is not None and r.returncode == 0 and "Error" not in (r.stderr or ""):
             log("    app abierta en el movil")
         else:
@@ -654,13 +831,15 @@ def discovery_responder(port, disc_port=DISCOVERY_PORT):
     propio 127.0.0.1 y no hace falta buscar a nadie, asi que antes se estaba
     escuchando en 0.0.0.0 y contestando a cualquiera de la red para nada.
 
-    El sondeo tiene que venir firmado y la respuesta va firmada:
+    Aqui NO hay firmas, y es a proposito: esto es una pista, no una decision de
+    confianza. Firmar el sondeo era regalar un verificador del codigo para
+    romperlo sin limite y sin volver a tocar la red; y firmar la respuesta no
+    servia de nada, porque la firma no ataba la IP y un intermediario reenviaba
+    el sondeo al PC de verdad para devolver su respuesta valida desde su propia
+    direccion.
 
-      - firmar la respuesta impide que un impostor que conteste antes se lleve
-        la conexion, y con ella todo lo que se teclee;
-      - exigir firma en el sondeo impide que esto sea un oraculo. Si contestara
-        con una firma a cualquiera que preguntase, bastaria pedirsela una vez y
-        romper el codigo despues, sin prisa y sin volver a tocar la red.
+    Quien decide es el apreton del TCP: es mutuo y deja la sesion cifrada y
+    firmada, asi que a un impostor que conteste aqui no le sirve de nada.
     """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -673,19 +852,9 @@ def discovery_responder(port, disc_port=DISCOVERY_PORT):
     while True:
         try:
             data, addr = s.recvfrom(160)
-            texto = data.decode("ascii", "replace").strip()
-            if not texto.startswith("USBMOUSE?"):
+            if not data.strip().startswith(b"USBMOUSE?"):
                 continue
-            p = texto.split(" ")
-            # "USBMOUSE? <nonce> <firma>"
-            if len(p) != 3 or len(p[1]) != 32:
-                continue
-            if not hmac.compare_digest(p[2], firma("D:%s" % p[1])):
-                # Ni un error ni un log por sondeo: quien no sepa el codigo no
-                # se entera siquiera de que hay algo aqui.
-                continue
-            resp = "USBMOUSE:%d %s" % (port, firma("R:%s:%d" % (p[1], port)))
-            s.sendto(resp.encode("ascii"), addr)
+            s.sendto(b"USBMOUSE:%d" % port, addr)
         except Exception:
             time.sleep(0.5)
 
@@ -770,8 +939,16 @@ def main():
     log("=" * 46)
     log("USB Mouse - escuchando en %s:%d" % (host, a.port))
     log("")
-    log("   CODIGO DE EMPAREJADO:  %s" % bonito(CODE))
-    log("   (guardado en %s)" % os.path.basename(fichero_codigo()))
+    # A la pantalla y NUNCA al fichero: install-autostart.bat arranca con --log,
+    # y el codigo acababa en usbmouse.log en claro mientras su propio fichero se
+    # guardaba con permisos 600. Un secreto en dos sitios es un secreto en el
+    # mas flojo de los dos.
+    if LOG_FILE:
+        log("   CODIGO DE EMPAREJADO: en %s (no se escribe en el registro)"
+            % os.path.basename(fichero_codigo()))
+    else:
+        log("   CODIGO DE EMPAREJADO:  %s" % bonito(CODE))
+        log("   (guardado en %s)" % os.path.basename(fichero_codigo()))
     log("   Por el cable de USB se le pasa solo al movil; por Wi-Fi hay que")
     log("   escribirlo una vez en los ajustes de la app. No lo compartas: con")
     log("   el, quien lo tenga puede teclear en este PC.")
