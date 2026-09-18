@@ -303,6 +303,9 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   dejaba el Bluetooth entero muerto en automático —donde no se usa— si el usuario lo denegaba.
 - **`onRequestPermissionsResult` mira todos los resultados**, no `res[0]`: con una petición de
   dos, daba por concedido lo denegado y volvía a preguntar.
+- **El aviso de «falta el código» es solo del modo CABLE.** En AUTO se comía los mensajes del
+  Bluetooth —«Anunciado. Empareja desde la tele», «Conectado · Salón»— para quejarse de un PC
+  que a lo mejor no existe, y el Bluetooth es justo lo que está pasando en ese momento.
 
 ## Comandos
 

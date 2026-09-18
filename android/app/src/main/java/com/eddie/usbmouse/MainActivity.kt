@@ -249,9 +249,12 @@ class MainActivity : Activity(), DeckIO {
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
         // En automatico, ademas, hay que decir CUAL de los dos enlaces ganó.
-        if (!ok && modo != BLUETOOTH && code.isEmpty() && vale == null) {
-            // Sin esto el lector decia "Esperando al PC..." para siempre y no
-            // habia forma de saber que lo que faltaba era el codigo.
+        // Solo en CABLE, que es donde el usuario ha pedido el cable a proposito y
+        // el aviso es lo unico que puede decirse. En AUTO esto se comia los
+        // mensajes del Bluetooth —"Anunciado. Empareja desde la tele", "Conectado
+        // - Salon"— para quejarse de un PC que a lo mejor no existe, y el
+        // Bluetooth es justo lo que esta pasando en ese momento.
+        if (!ok && modo == CABLE && code.isEmpty() && vale == null) {
             lastWire = 0
             say("Falta el código del PC (ajustes)")
             return
