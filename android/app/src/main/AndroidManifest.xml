@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Hacerse visible es "anunciarse", y desde Android 12 eso es ADVERTISE y no
+         CONNECT. Sin este permiso ACTION_REQUEST_DISCOVERABLE lanza SecurityException,
+         el catch se la tragaba y el movil no se hacia visible nunca: el emparejado
+         inicial por Bluetooth no podia completarse y no habia ni un error a la vista. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
 
     <application
         android:allowBackup="true"

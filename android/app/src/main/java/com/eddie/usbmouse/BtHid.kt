@@ -170,8 +170,21 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
         override fun onConnectionStateChanged(device: BluetoothDevice?, state: Int) {
             when (state) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    // Si hay aparato elegido, solo ese. Estando visible cinco
+                    // minutos, cualquier otro equipo a tiro podia engancharse y
+                    // quedarse con todo lo que se tecleara.
+                    val m = deseado
+                    if (m != null && device?.address != m) {
+                        onStatus("Rechazado ${device?.address ?: "?"}: no es el aparato elegido")
+                        try { hid?.disconnect(device) } catch (_: Throwable) {}
+                        return
+                    }
                     host = device
                     nombreHost = try { device?.name } catch (_: Throwable) { null }
+                    // Lo encolado mientras no habia nadie se tira: si no, al
+                    // conectar salia de golpe una rafaga de hasta 128 clics y
+                    // teclas contra la tele.
+                    urgentes.clear()
                     conectado.set(true)
                     arrancarBomba()
                     onStatus("Conectado - ${nombreHost ?: "?"}")
@@ -199,11 +212,25 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
     private var accRueda = 0f
     private var botones = 0
 
+    /**
+     * Arranca el hilo que vacia los acumuladores.
+     *
+     * Antes era `if (vivo) return`, y eso tenia una carrera: si el anfitrion
+     * volvia dentro de los 8 ms que el hilo viejo pasa durmiendo, la llamada
+     * salia por ese return y acto seguido el hilo viejo veia su condicion falsa,
+     * ponia `vivo = false` y moria. Quedaba conectado y sin bomba: el puntero
+     * congelado y ni un error. Ahora se espera a que el viejo muera de verdad.
+     */
     private fun arrancarBomba() {
-        if (vivo) return
+        val vieja = bomba
+        vivo = false
+        if (vieja != null && vieja.isAlive && vieja !== Thread.currentThread()) {
+            try { vieja.join(80) } catch (_: InterruptedException) {}
+        }
         vivo = true
+        lateinit var yo: Thread
         bomba = Thread {
-            while (vivo && conectado.get()) {
+            while (vivo && conectado.get() && bomba === yo) {
                 try {
                     while (true) (urgentes.poll() ?: break).run()
                     var dx: Int; var dy: Int; var w: Int
@@ -218,8 +245,10 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
                     break
                 }
             }
-            vivo = false
-        }.apply { isDaemon = true; start() }
+            // Solo el hilo que sigue siendo el titular apaga la bandera: si no,
+            // un hilo viejo agonizando apagaba la bomba del nuevo.
+            if (bomba === yo) vivo = false
+        }.also { yo = it }.apply { isDaemon = true; start() }
     }
 
     /** Parte entera acotada a lo que cabe en un byte con signo. */
@@ -277,6 +306,7 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
 
     override fun click(b: Char) {
         val m = bit(b)
+        if (!conectado.get()) return
         urgentes.offer(Runnable {
             botones = botones or m; enviarRaton(0, 0, 0)
             botones = botones and m.inv(); enviarRaton(0, 0, 0)
@@ -285,6 +315,7 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
 
     override fun button(b: Char, down: Boolean) {
         val m = bit(b)
+        if (!conectado.get()) return
         urgentes.offer(Runnable {
             botones = if (down) botones or m else botones and m.inv()
             enviarRaton(0, 0, 0)
@@ -293,6 +324,7 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
 
     override fun text(s: String) {
         if (s.isEmpty()) return
+        if (!conectado.get()) return
         urgentes.offer(Runnable {
             for (c in s) {
                 val (codigo, shift) = HidKeys.charOf(c)
@@ -302,18 +334,27 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
     }
 
     override fun key(name: String) {
-        val c = HidKeys.keyOf(name)
-        urgentes.offer(Runnable { pulsarYSoltar(0, c) })
+        if (!conectado.get()) return
+        val raw = HidKeys.keyOf(name)
+        val c = raw and 0xFF
+        val m = if (raw and HidKeys.NEEDS_SHIFT != 0) HidKeys.SHIFT else 0
+        urgentes.offer(Runnable { pulsarYSoltar(m, c) })
     }
 
     override fun keyHold(name: String, down: Boolean) {
-        val c = HidKeys.keyOf(name)
-        urgentes.offer(Runnable { if (down) enviarTecla(0, c) else enviarTecla(0, 0) })
+        if (!conectado.get()) return
+        val raw = HidKeys.keyOf(name)
+        val c = raw and 0xFF
+        val m = if (raw and HidKeys.NEEDS_SHIFT != 0) HidKeys.SHIFT else 0
+        urgentes.offer(Runnable { if (down) enviarTecla(m, c) else enviarTecla(0, 0) })
     }
 
     override fun combo(mods: String, name: String) {
-        val m = HidKeys.modMask(mods)
-        val c = HidKeys.keyOf(name)
+        if (!conectado.get()) return
+        val raw = HidKeys.keyOf(name)
+        val c = raw and 0xFF
+        var m = HidKeys.modMask(mods)
+        if (raw and HidKeys.NEEDS_SHIFT != 0) m = m or HidKeys.SHIFT
         urgentes.offer(Runnable { pulsarYSoltar(m, c) })
     }
 
@@ -328,6 +369,17 @@ class BtHid(private val ctx: Context, private val onStatus: (String) -> Unit) : 
             host?.let { hid?.disconnect(it) }
             hid?.unregisterApp()
         } catch (_: Exception) {}
+        // Soltar el proxy y el executor. Sin esto, cada cambio de modo dejaba
+        // un hilo colgado y un perfil sin devolver, y al cabo de unos cuantos
+        // el registro empezaba a fallar con "No pude anunciarme".
+        try {
+            val a = (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+            hid?.let { a?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
+        } catch (_: Throwable) {}
+        hid = null
+        // shutdown y no shutdownNow: las devoluciones de llamada del desregistro
+        // corren en este mismo executor y tienen que poder terminar.
+        try { exec.shutdown() } catch (_: Throwable) {}
         host = null
         urgentes.clear()
     }

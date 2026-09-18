@@ -79,6 +79,7 @@ class MainActivity : Activity(), DeckIO {
     private lateinit var panel: LinearLayout
     private lateinit var hostIn: EditText
     private lateinit var portIn: EditText
+    private lateinit var codeIn: EditText
     private lateinit var famMouse: GlyphView
     private lateinit var famPad: GlyphView
     private lateinit var keyGlyph: GlyphView
@@ -102,6 +103,9 @@ class MainActivity : Activity(), DeckIO {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun col(hex: String) = Color.parseColor(hex)
 
+    /** El codigo de emparejado del PC, ya normalizado. Vacio = no hay. */
+    private val code: String get() = prefs.getString("code", "") ?: ""
+
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -121,6 +125,9 @@ class MainActivity : Activity(), DeckIO {
         keys = KeyDeck(this, this)
         setContentView(buildChassis())
         rebuild()
+        // Despues de construir: toca el transporte y el lector, y ninguno de los
+        // dos existe todavia arriba.
+        tomarCodigo(intent)
         arrancarEnlace()
     }
 
@@ -229,6 +236,13 @@ class MainActivity : Activity(), DeckIO {
         // El mensaje se tiraba: el LED decia el color pero no el motivo. Los
         // cambios de conexion son raros, asi que se saltan la espera del lector.
         // En automatico, ademas, hay que decir CUAL de los dos enlaces ganó.
+        if (!ok && modo != BLUETOOTH && code.isEmpty()) {
+            // Sin esto el lector decia "Esperando al PC..." para siempre y no
+            // habia forma de saber que lo que faltaba era el codigo.
+            lastWire = 0
+            say("Falta el código del PC (ajustes)")
+            return
+        }
         if (msg.isEmpty()) return
         lastWire = 0
         say(if (ok && modo == AUTO) "${if (l === usb) "cable" else "bt"} · ${l.label}" else msg)
@@ -514,6 +528,26 @@ class MainActivity : Activity(), DeckIO {
             leftMargin = dp(10)
         })
         panel.addView(row)
+
+        // Por el cable el servidor se lo pasa solo; esto es para Wi-Fi, donde no
+        // hay ningun canal de confianza por el que mandarlo. Y hace falta: por
+        // ese socket viajan pulsaciones de teclado, o sea que quien lo abra
+        // ejecuta lo que quiera en el PC.
+        panel.addView(etched("Código del PC    lo enseña el servidor al arrancar",
+            11f, Monet.etchDim), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+            topMargin = dp(12)
+        })
+        codeIn = EditText(this).apply {
+            val guardado = code
+            setText(if (guardado.isEmpty()) "" else Pairing.bonito(guardado))
+            hint = "ABCD-EFGH-JKMN"
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setTextColor(Monet.etch); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        }
+        panel.addView(codeIn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         return panel
     }
 
@@ -558,9 +592,20 @@ class MainActivity : Activity(), DeckIO {
     private fun applyTarget() {
         val host = hostIn.text.toString().trim().ifEmpty { "auto" }
         val port = portIn.text.toString().trim().toIntOrNull() ?: 8777
-        prefs.edit().putString("host", host).putInt("port", port).apply()
+        val pin = Pairing.normal(codeIn.text.toString())
+        if (pin.isNotEmpty() && pin.length != Pairing.LARGO) {
+            say("El código son ${Pairing.LARGO} símbolos")
+            return
+        }
+        prefs.edit().putString("host", host).putInt("port", port)
+            .putString("code", pin).apply()
+        codeIn.setText(if (pin.isEmpty()) "" else Pairing.bonito(pin))
         usb.close()
-        if (!host.equals("auto", true)) usb.connect(host, port)
+        if (pin.isEmpty()) {
+            say("Sin código no hay cable")
+        } else if (!host.equals("auto", true)) {
+            usb.connect(host, port, pin)
+        }
         startAutoLoop()
     }
 
@@ -597,12 +642,19 @@ class MainActivity : Activity(), DeckIO {
             if (modo == BLUETOOTH) say("Bluetooth HID pide Android 9")
             return
         }
-        if (Build.VERSION.SDK_INT >= 31 &&
-            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 7)
-            return
+        // Los dos, y no solo CONNECT: hacerse visible es "anunciarse", que desde
+        // Android 12 es ADVERTISE. Sin el, el dialogo de visibilidad lanzaba
+        // SecurityException, el catch se la tragaba y el emparejado inicial no
+        // podia completarse nunca.
+        if (Build.VERSION.SDK_INT >= 31) {
+            val faltan = arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+            if (faltan.isNotEmpty()) {
+                requestPermissions(faltan.toTypedArray(), 7)
+                return
+            }
         }
         val b = bt ?: BtHid(this) { msg -> runOnUiThread { onStatus(msg) } }.also { bt = it }
         val mac = prefs.getString("btmac", null)
@@ -621,8 +673,10 @@ class MainActivity : Activity(), DeckIO {
                 Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
                     .putExtra(android.bluetooth.BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
             )
-        } catch (_: Exception) {
-            say("No pude pedir visibilidad")
+        } catch (e: Exception) {
+            // Se dice el motivo: callarlo era lo que hacia que "no encuentro el
+            // movil" pareciera cosa de la tele y no un permiso que falta.
+            say("No pude pedir visibilidad: ${e.javaClass.simpleName}")
         }
     }
 
@@ -669,23 +723,45 @@ class MainActivity : Activity(), DeckIO {
         autoRunning = true
         Thread {
             while (autoRunning) {
-                if (autoConnect && modo != BLUETOOTH && !usb.isConnected) {
+                val pin = code
+                if (autoConnect && modo != BLUETOOTH && !usb.isConnected && pin.isNotEmpty()) {
                     val typed = prefs.getString("host", "auto") ?: "auto"
                     val port = prefs.getInt("port", 8777)
                     if (typed.equals("auto", true) || typed.isEmpty()) {
-                        usb.connect("127.0.0.1", port)
+                        usb.connect("127.0.0.1", port, pin)
                         Thread.sleep(600)
                         if (!usb.isConnected) {
-                            val found = Discovery.find()
-                            if (found != null) usb.connect(found.first, found.second)
+                            val found = Discovery.find(pin)
+                            if (found != null) usb.connect(found.first, found.second, pin)
                         }
                     } else {
-                        usb.connect(typed, port)
+                        usb.connect(typed, port, pin)
                     }
                 }
                 try { Thread.sleep(1500) } catch (_: InterruptedException) { break }
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    override fun onNewIntent(nuevo: Intent?) {
+        super.onNewIntent(nuevo)
+        if (nuevo != null) { intent = nuevo; tomarCodigo(nuevo) }
+    }
+
+    /**
+     * El servidor pasa su codigo por el propio cable al abrir la app
+     * (`am start -e code ...`), asi que por USB no hay que teclear nada. El
+     * canal ya esta autorizado: para llegar ahi el usuario ha tenido que
+     * aceptar la depuracion USB de ese PC.
+     */
+    private fun tomarCodigo(i: Intent?) {
+        val crudo = try { i?.getStringExtra("code") } catch (_: Exception) { null } ?: return
+        val c = Pairing.normal(crudo)
+        if (c.length != Pairing.LARGO) return
+        if (c == code) return
+        prefs.edit().putString("code", c).apply()
+        usb.close()
+        say("Emparejado con el PC")
     }
 
     override fun onResume() {

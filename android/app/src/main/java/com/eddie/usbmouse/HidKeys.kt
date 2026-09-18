@@ -45,9 +45,25 @@ object HidKeys {
         for (i in 13..24) put("f$i", 0x68 + i - 13)
     }
 
-    /** Nombre del protocolo -> codigo, o 0 si aqui no existe. */
+    /**
+     * Marca de que el codigo devuelto necesita shift. Va en un bit alto y no en
+     * un Pair para no asignar nada por tecla.
+     */
+    const val NEEDS_SHIFT = 0x100
+
+    /**
+     * Nombre del protocolo -> codigo, o 0 si aqui no existe. El bit
+     * [NEEDS_SHIFT] viene puesto cuando la tecla solo se alcanza con shift.
+     *
+     * Se perdia: `charOf` ya decia que '?' es shift+'/', pero keyOf tiraba ese
+     * dato y se mandaba '/' pelado. Hoy no se nota porque el teclado de la app
+     * no tiene simbolos, pero rompe en cuanto se anada el primero.
+     */
     fun keyOf(name: String): Int {
-        if (name.length == 1) return charOf(name[0]).first
+        if (name.length == 1) {
+            val (c, shift) = charOf(name[0])
+            return if (c == 0) 0 else if (shift) c or NEEDS_SHIFT else c
+        }
         return especiales[name.lowercase()] ?: 0
     }
 

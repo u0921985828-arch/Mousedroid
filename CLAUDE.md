@@ -86,8 +86,34 @@ Nombres de tecla: `enter back tab esc space up down left right home end pgup pgd
 f1..f20`, o **un solo carácter literal** — `Hc,c` es Ctrl+C. Los que no existan en ese sistema
 se ignoran con un aviso en `-v`; no rompen la conexión.
 
-Puerto por defecto 8777. Descubrimiento en UDP 8778: el móvil lanza `USBMOUSE?` a broadcast y
-el PC responde `USBMOUSE:<puerto>`.
+Puerto por defecto 8777. Descubrimiento en UDP 8778, y **solo con `--lan`**: el móvil lanza
+`USBMOUSE? <nonce> <firma>` a broadcast y el PC responde `USBMOUSE:<puerto> <firma>`.
+
+## Emparejado del cable
+
+Por ese socket viajan pulsaciones de teclado, o sea **ejecución de código** en el PC. Sin
+autenticar, cualquiera en la misma Wi-Fi lo abría con `nc` y escribía lo que quisiera, y por el
+túnel de adb podía hacerlo cualquier app del móvil con solo permiso de `INTERNET`.
+
+El código son 12 símbolos (60 bits) de un alfabeto sin `I`, `L`, `O` ni `U`. Vive en
+`server/usbmouse-code.txt` (permisos 600) y **no viaja nunca por la red**: cada lado firma el
+número aleatorio del otro con HMAC-SHA256.
+
+```
+PC    -> móvil   U1 <nonceS>
+móvil -> PC      A <hmac(código, "S:nonceS:nonceC")> <nonceC>
+PC    -> móvil   B <hmac(código, "C:nonceC:nonceS")>
+```
+
+- **Se comprueban los dos**, no solo el móvil. Si el móvil no verificara al PC, quien conteste
+  antes al sondeo UDP se lleva la conexión y con ella todo lo que se teclee.
+- **El sondeo UDP también va firmado.** Si el PC contestara con una firma a cualquiera que
+  pregunte, sería un oráculo: se le pide una vez y se rompe el código sin volver a tocar la red.
+- Por USB el código se lo pasa el servidor al móvil al abrir la app (`am start -e code`), así
+  que no hay que teclear nada; ese canal ya está autorizado por la depuración USB. Por Wi-Fi se
+  escribe una vez en los ajustes.
+- Cinco fallos desde una IP y se bloquea un minuto, más medio segundo de castigo por intento.
+  Con eso 60 bits son inalcanzables aunque se pruebe sin parar.
 
 El servidor suelta solo lo que quedara pulsado al cortarse la línea, teclas incluidas
 (`Keys.release_all`), y los modificadores de un atajo se sueltan en orden inverso.
@@ -218,6 +244,26 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   `resolver()` termina llamando a `aplicar()` porque asignar `color` pisa el alfa del latido.
 - **`DeckIO.haptic(fuerte)` tiene dos golpes a propósito**: 9 ms para un clic, 17 ms y más
   amplitud para el tope de un escalón, que en un ratón de verdad es un diente mecánico.
+- **`BLUETOOTH_ADVERTISE` hace falta además de `CONNECT`.** Hacerse visible es *anunciarse*, y
+  desde Android 12 eso es otro permiso. Sin él `ACTION_REQUEST_DISCOVERABLE` lanza
+  `SecurityException`, el `catch` se la tragaba y el emparejado inicial no podía completarse:
+  parecía cosa de la tele.
+- **`BtHid` solo acepta el aparato elegido.** Con los cinco minutos de visibilidad, cualquier
+  equipo a tiro podía engancharse y quedarse con lo que se tecleara.
+- **`arrancarBomba()` espera a que muera el hilo anterior.** Era `if (vivo) return`, y si el
+  anfitrión volvía dentro de los 8 ms de sueño del hilo viejo, éste se moría después apagando la
+  bandera: quedaba conectado y sin bomba, con el puntero congelado y sin un solo error.
+- **Nada se encola sin conexión.** Los clics y teclas guardados mientras no había nadie salían
+  de golpe al conectar: hasta 128 de ráfaga contra la tele.
+- **`keyOf` devuelve el bit `NEEDS_SHIFT`.** `charOf` ya sabía que `?` es shift+`/`, pero `keyOf`
+  tiraba ese dato y se mandaba `/` pelado.
+- **El `release` no lleva `signingConfig`.** Estaba firmando con la clave de depuración, que es
+  pública y viene con el SDK: cualquiera podía publicar una versión troyanizada que Android
+  aceptaba como *actualización*. Mejor un APK sin firmar que una firma que no significa nada.
+- **`numero()` rechaza `inf` y `nan`.** Una sola línea `Minf,0` envenenaba el acumulador del
+  cursor y el ratón no se movía hasta reconectar.
+- **`readline` va con tope y las conexiones también.** Sin el tope, un cliente que no mandara
+  nunca un fin de línea tumbaba el servidor por memoria.
 
 ## Comandos
 

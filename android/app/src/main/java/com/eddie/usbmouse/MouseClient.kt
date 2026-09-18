@@ -32,25 +32,46 @@ class MouseClient(private val onStatus: (String) -> Unit) : Transport {
     private var destino = ""
     override val label: String get() = destino
 
-    /** Seguro de llamar en bucle: ignora la llamada si ya hay conexion o intento en curso. */
-    fun connect(host: String, port: Int) {
+    /**
+     * Seguro de llamar en bucle: ignora la llamada si ya hay conexion o intento
+     * en curso.
+     *
+     * [code] es el codigo de emparejamiento del PC. Sin el no se conecta, y no
+     * es una molestia gratuita: por este socket viajan pulsaciones de teclado,
+     * asi que quien lo abra ejecuta lo que quiera en el otro lado.
+     */
+    fun connect(host: String, port: Int, code: String) {
         if (connected.get()) return
+        if (code.length < Pairing.LARGO) { onStatus("Falta el código del PC"); return }
         if (!busy.compareAndSet(false, true)) return
         destino = "$host:$port"
         onStatus("Conectando a $host:$port...")
         Thread {
+            var s: Socket? = null
             try {
-                val s = Socket()
+                s = Socket()
                 s.connect(InetSocketAddress(host, port), 4000)
                 s.tcpNoDelay = true
+                // Mientras dura el apreton de manos hay que poder rendirse: un
+                // impostor que conteste al sondeo y luego calle nos dejaria
+                // colgados para siempre.
+                s.soTimeout = 5000
+                val o = BufferedOutputStream(s.getOutputStream(), 512)
+                if (!Pairing.handshake(s.getInputStream(), o, code)) {
+                    onStatus("Código rechazado por $host")
+                    try { s.close() } catch (_: Exception) {}
+                    return@Thread
+                }
+                s.soTimeout = 0
                 socket = s
-                out = BufferedOutputStream(s.getOutputStream(), 512)
+                out = o
                 connected.set(true)
                 busy.set(false)
                 onStatus("Conectado - $host:$port")
                 pump()
             } catch (e: Exception) {
                 connected.set(false)
+                try { s?.close() } catch (_: Exception) {}
                 onStatus("Esperando al PC...")
                 closeQuiet()
             } finally {

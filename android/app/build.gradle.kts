@@ -18,7 +18,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            // SIN signingConfig a proposito. Estaba firmando con la clave de
+            // depuracion, que es publica y viene con el SDK: cualquiera podia
+            // publicar una version troyanizada que Android aceptaba como
+            // ACTUALIZACION de esta app, sin un solo aviso. Mejor que
+            // assembleRelease deje un APK sin firmar y haya que firmarlo con
+            // una clave propia que una firma que no significa nada.
         }
     }
 

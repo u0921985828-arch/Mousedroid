@@ -21,11 +21,24 @@ Protocolo (lineas terminadas en \n; UTF-8, que es ASCII salvo en el texto de K):
 
 Nombres de tecla: enter back tab esc space up down left right home end
 pgup pgdn del ins caps f1..f20, o un solo caracter literal ("Hc,c" = Ctrl+C).
+
+Antes de nada va el emparejado. Sin el, abrir este puerto era escribir con el
+teclado del PC: ejecucion de codigo. El codigo no viaja por la red, los dos
+lados firman el numero aleatorio del otro y los dos se comprueban:
+
+    PC    -> movil   U1 <nonceS>
+    movil -> PC      A <hmac(codigo, "S:nonceS:nonceC")> <nonceC>
+    PC    -> movil   B <hmac(codigo, "C:nonceC:nonceS")>
 """
 
 import argparse
+import hmac
+import hashlib
+import math
 import os
+import secrets
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -241,14 +254,43 @@ class Keys:
 
 
 def handle(conn, addr, verbose=False):
-    cur = Cursor()
-    keys = Keys()
+    # Tope de conexiones: sin el, cualquiera podia abrir miles de sockets y
+    # dejar un hilo colgado en cada uno.
+    if not CONEXIONES.acquire(blocking=False):
+        log("[!] Demasiadas conexiones a la vez; rechazo", addr[0])
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+    cur = None
+    keys = None
+    contado = False
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    log("[+] Movil conectado", addr[0])
-    contar(conectados=+1)
     try:
         with conn.makefile("rb") as f:
-            for raw in f:
+            # Nada de lo que venga detras se toca hasta que el otro lado
+            # demuestre que conoce el codigo.
+            conn.settimeout(8)
+            if not handshake(conn, f, addr):
+                log("[-] Conexion rechazada", addr[0])
+                return
+            conn.settimeout(None)
+            cur = Cursor()
+            keys = Keys()
+            log("[+] Movil conectado", addr[0])
+            contar(conectados=+1)
+            contado = True
+            while True:
+                # readline CON TOPE: sin el, un cliente que mande bytes sin
+                # ningun fin de linea hace crecer el buffer hasta tumbar el
+                # servidor por memoria.
+                raw = f.readline(MAX_LINEA)
+                if not raw:
+                    break
+                if not raw.endswith(b"\n") and len(raw) >= MAX_LINEA:
+                    log("[!] Linea demasiado larga desde", addr[0], "- cierro")
+                    break
                 # solo el fin de linea: en K los espacios de los extremos son texto
                 line = raw.rstrip(b"\r\n").decode("utf-8", "replace")
                 if not line:
@@ -257,10 +299,10 @@ def handle(conn, addr, verbose=False):
                 try:
                     if op == "M":
                         x, y = arg.split(",")
-                        cur.move(float(x), float(y))
+                        cur.move(numero(x), numero(y))
                     elif op == "S":
                         x, y = arg.split(",")
-                        cur.scroll(float(x), float(y))
+                        cur.scroll(numero(x), numero(y))
                     elif op == "C":
                         cur.click(arg)
                     elif op == "D":
@@ -289,17 +331,21 @@ def handle(conn, addr, verbose=False):
                 except Exception as e:
                     if verbose:
                         log("    ! error en", line, "->", e)
-    except (ConnectionResetError, OSError):
+    except (ConnectionResetError, OSError, socket.timeout):
         pass
     finally:
-        cur.release_all()
-        keys.release_all()
+        if cur is not None:
+            cur.release_all()
+        if keys is not None:
+            keys.release_all()
         try:
             conn.close()
         except Exception:
             pass
-        log("[-] Movil desconectado")
-        contar(conectados=-1)
+        if contado:
+            log("[-] Movil desconectado")
+            contar(conectados=-1)
+        CONEXIONES.release()
 
 
 # ---------------------------------------------------------------- adb
@@ -342,6 +388,159 @@ def carpeta():
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
+
+
+# ---------------------------------------------------------------- emparejado
+#
+# Por este socket viajan pulsaciones de teclado, o sea ejecucion de codigo con
+# tu usuario. Sin codigo, cualquiera en la misma Wi-Fi abria el puerto con `nc`
+# y escribia lo que quisiera; y por el tunel de adb podia hacerlo cualquier app
+# del movil con solo permiso de INTERNET.
+#
+# El codigo NO viaja por la red: cada lado firma el numero aleatorio del otro.
+# Y se comprueban LOS DOS, no solo el movil, porque quien conteste antes al
+# sondeo UDP se llevaria todo lo tecleado, contrasenas incluidas.
+
+# Sin I, L, O ni U: las que se confunden al copiar a mano.
+ABC = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+LARGO_CODIGO = 12          # 12 de 32 simbolos = 60 bits
+CODE = ""
+
+MAX_LINEA = 4096           # una linea de protocolo no llega ni a 64 bytes
+MAX_CONEXIONES = 4
+CONEXIONES = threading.Semaphore(MAX_CONEXIONES)
+
+# Freno contra la fuerza bruta en linea: cinco fallos y esa IP se queda fuera
+# un minuto. Con eso, 60 bits son inalcanzables aunque se pruebe sin parar.
+FALLOS = {}
+FALLOS_LOCK = threading.Lock()
+
+
+def normal(raw):
+    """Mayusculas, sin separadores y con las confusiones tipicas corregidas."""
+    out = []
+    for ch in (raw or "").upper():
+        ch = {"I": "1", "L": "1", "O": "0", "U": "V"}.get(ch, ch)
+        if ch in ABC:
+            out.append(ch)
+    return "".join(out)
+
+
+def bonito(code):
+    return "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+
+
+def firma(msg):
+    return hmac.new(CODE.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def fichero_codigo():
+    return os.path.join(carpeta(), "usbmouse-code.txt")
+
+
+def cargar_codigo(forzado=None, nuevo=False):
+    """Lee el codigo guardado, o genera uno la primera vez."""
+    ruta = fichero_codigo()
+    if forzado:
+        c = normal(forzado)
+        if len(c) != LARGO_CODIGO:
+            log("[!] El codigo de --code debe tener %d simbolos de %s" % (LARGO_CODIGO, ABC))
+            return None
+        return c
+    if not nuevo and os.path.exists(ruta):
+        try:
+            with open(ruta, "r", encoding="utf-8") as f:
+                c = normal(f.read())
+            if len(c) == LARGO_CODIGO:
+                return c
+        except Exception:
+            pass
+    c = "".join(secrets.choice(ABC) for _ in range(LARGO_CODIGO))
+    try:
+        with open(ruta, "w", encoding="utf-8") as f:
+            f.write(bonito(c) + "\n")
+        # Solo el dueno: en un PC compartido el codigo es la llave de todo.
+        try:
+            os.chmod(ruta, stat.S_IRUSR | stat.S_IWUSR)
+        except Exception:
+            pass
+    except Exception as e:
+        log("[!] No pude guardar el codigo:", e, "(se pedira otro al reiniciar)")
+    return c
+
+
+def bloqueada(ip):
+    with FALLOS_LOCK:
+        n, hasta = FALLOS.get(ip, (0, 0.0))
+        return time.time() < hasta
+
+
+def anotar_fallo(ip):
+    with FALLOS_LOCK:
+        n, hasta = FALLOS.get(ip, (0, 0.0))
+        n += 1
+        if n >= 5:
+            hasta = time.time() + 60
+            n = 0
+            log("[!] Demasiados codigos malos desde", ip, "- bloqueada 60 s")
+        FALLOS[ip] = (n, hasta)
+
+
+def limpiar_fallos(ip):
+    with FALLOS_LOCK:
+        FALLOS.pop(ip, None)
+
+
+def leer_linea(f, maximo=512):
+    raw = f.readline(maximo)
+    if not raw:
+        return None
+    if not raw.endswith(b"\n") and len(raw) >= maximo:
+        return None
+    return raw.decode("utf-8", "replace").strip()
+
+
+def handshake(conn, f, addr):
+    """
+    Apreton mutuo. True solo si los dos lados prueban que conocen el codigo.
+
+        PC    -> movil   U1 <nonceS>
+        movil -> PC      A <hmac(S:nonceS:nonceC)> <nonceC>
+        PC    -> movil   B <hmac(C:nonceC:nonceS)>
+    """
+    ip = addr[0]
+    if bloqueada(ip):
+        return False
+    nonce_s = secrets.token_hex(16)
+    conn.sendall(("U1 %s\n" % nonce_s).encode("ascii"))
+    linea = leer_linea(f)
+    if not linea:
+        return False
+    p = linea.split(" ")
+    if len(p) != 3 or p[0] != "A" or len(p[2]) != 32:
+        anotar_fallo(ip)
+        return False
+    nonce_c = p[2]
+    if not hmac.compare_digest(p[1], firma("S:%s:%s" % (nonce_s, nonce_c))):
+        # medio segundo de castigo: convierte cualquier barrido en inviable
+        time.sleep(0.5)
+        anotar_fallo(ip)
+        log("[!] Codigo incorrecto desde", ip)
+        return False
+    conn.sendall(("B %s\n" % firma("C:%s:%s" % (nonce_c, nonce_s))).encode("ascii"))
+    limpiar_fallos(ip)
+    return True
+
+
+def numero(txt):
+    """
+    Float del protocolo, saneado. `inf` y `nan` envenenaban el acumulador del
+    cursor: una sola linea "Minf,0" y el raton no se movia hasta reconectar.
+    """
+    v = float(txt)
+    if not math.isfinite(v):
+        raise ValueError("no finito")
+    return max(-10000.0, min(10000.0, v))
 
 
 def apk_a_mano():
@@ -399,7 +598,11 @@ def prepare(exe, serial, port, launch, wake, install=True):
             log("    (la app no esta y no hay APK: compila con 'gradlew assembleDebug'")
             log("     o deja un UsbMouse.apk junto a este servidor)")
     if launch:
-        r = adb(exe, "-s", serial, "shell", "am", "start", "-n", f"{PACKAGE}/.MainActivity")
+        # El codigo se le pasa al movil por el propio cable, asi que por USB no
+        # hay que teclear nada. El canal ya esta autorizado: para llegar aqui el
+        # usuario ha tenido que aceptar la depuracion USB de este PC.
+        r = adb(exe, "-s", serial, "shell", "am", "start", "-n", f"{PACKAGE}/.MainActivity",
+                "-e", "code", CODE)
         if r is not None and r.returncode == 0 and "Error" not in (r.stderr or ""):
             log("    app abierta en el movil")
         else:
@@ -444,7 +647,21 @@ def watcher(exe, port, launch, wake, install=True, interval=2.0):
 
 
 def discovery_responder(port, disc_port=DISCOVERY_PORT):
-    """Responde a los sondeos del movil para que encuentre la IP del PC solo."""
+    """
+    Responde a los sondeos del movil para que encuentre la IP del PC solo.
+
+    Solo se levanta con --lan: sin el, el movil llega por el tunel de adb a su
+    propio 127.0.0.1 y no hace falta buscar a nadie, asi que antes se estaba
+    escuchando en 0.0.0.0 y contestando a cualquiera de la red para nada.
+
+    El sondeo tiene que venir firmado y la respuesta va firmada:
+
+      - firmar la respuesta impide que un impostor que conteste antes se lleve
+        la conexion, y con ella todo lo que se teclee;
+      - exigir firma en el sondeo impide que esto sea un oraculo. Si contestara
+        con una firma a cualquiera que preguntase, bastaria pedirsela una vez y
+        romper el codigo despues, sin prisa y sin volver a tocar la red.
+    """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -455,9 +672,20 @@ def discovery_responder(port, disc_port=DISCOVERY_PORT):
     log("Descubrimiento automatico activo (UDP %d)" % disc_port)
     while True:
         try:
-            data, addr = s.recvfrom(64)
-            if data.strip().startswith(b"USBMOUSE?"):
-                s.sendto(b"USBMOUSE:%d" % port, addr)
+            data, addr = s.recvfrom(160)
+            texto = data.decode("ascii", "replace").strip()
+            if not texto.startswith("USBMOUSE?"):
+                continue
+            p = texto.split(" ")
+            # "USBMOUSE? <nonce> <firma>"
+            if len(p) != 3 or len(p[1]) != 32:
+                continue
+            if not hmac.compare_digest(p[2], firma("D:%s" % p[1])):
+                # Ni un error ni un log por sondeo: quien no sepa el codigo no
+                # se entera siquiera de que hay algo aqui.
+                continue
+            resp = "USBMOUSE:%d %s" % (port, firma("R:%s:%d" % (p[1], port)))
+            s.sendto(resp.encode("ascii"), addr)
         except Exception:
             time.sleep(0.5)
 
@@ -496,7 +724,7 @@ def salir():
 
 
 def main():
-    global LOG_FILE, BANDEJA
+    global LOG_FILE, BANDEJA, CODE
     p = argparse.ArgumentParser(description="Servidor PC de USB Mouse")
     p.add_argument("--port", type=int, default=8777)
     p.add_argument("--adb", default="adb", help="ruta al ejecutable adb")
@@ -515,11 +743,19 @@ def main():
                    help="escuchar en todas las interfaces (anclaje USB o Wi-Fi, sin adb)")
     p.add_argument("--log", nargs="?", const="usbmouse.log", default=None,
                    help="volcar la salida a un fichero (modo silencioso)")
+    p.add_argument("--code", default=None,
+                   help="codigo de emparejamiento a usar (por defecto, el guardado)")
+    p.add_argument("--new-code", action="store_true",
+                   help="generar un codigo nuevo y olvidar el anterior")
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args()
 
     if a.log:
         LOG_FILE = os.path.join(carpeta(), a.log)
+
+    CODE = cargar_codigo(a.code, a.new_code)
+    if not CODE:
+        return
 
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -529,10 +765,17 @@ def main():
     except OSError as e:
         log("[!] No puedo abrir el puerto", a.port, "->", e, "(ya hay otro servidor corriendo?)")
         return
-    srv.listen(2)
+    srv.listen(MAX_CONEXIONES * 2)
 
     log("=" * 46)
     log("USB Mouse - escuchando en %s:%d" % (host, a.port))
+    log("")
+    log("   CODIGO DE EMPAREJADO:  %s" % bonito(CODE))
+    log("   (guardado en %s)" % os.path.basename(fichero_codigo()))
+    log("   Por el cable de USB se le pasa solo al movil; por Wi-Fi hay que")
+    log("   escribirlo una vez en los ajustes de la app. No lo compartas: con")
+    log("   el, quien lo tenga puede teclear en este PC.")
+    log("")
     if a.lan:
         log("IPs de este PC:", ", ".join(local_ips()) or "(desconocidas)")
         log("En anclaje USB suele ser 192.168.42.x")
@@ -541,7 +784,11 @@ def main():
         if BANDEJA:
             log("Icono de bandeja activo (doble clic = registro, derecho = menu)")
         pintar_estado()
-    threading.Thread(target=discovery_responder, args=(a.port,), daemon=True).start()
+    # Solo con --lan: por el tunel de adb el movil habla con su propio
+    # 127.0.0.1 y no tiene a quien buscar, asi que abrir el UDP no aportaba
+    # nada y delataba el equipo a toda la red.
+    if a.lan:
+        threading.Thread(target=discovery_responder, args=(a.port,), daemon=True).start()
     if a.auto and not a.lan:
         log("Modo automatico: enchufa el movil y listo.")
         threading.Thread(target=watcher,
