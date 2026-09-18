@@ -371,11 +371,11 @@ class MainActivity : Activity(), DeckIO {
         }
         bar.addView(tierPips, LinearLayout.LayoutParams(dp(44), dp(22)).apply { leftMargin = dp(4) })
 
-        val gear = etched("·  ·  ·", 12f, Monet.etchDim).apply {
-            setPadding(dp(9), dp(3), dp(4), dp(3))
+        val gear = GlyphView(this, "menu").apply {
+            tint = Monet.etch
             setOnClickListener { haptic(); togglePanel() }
         }
-        bar.addView(gear)
+        bar.addView(gear, LinearLayout.LayoutParams(dp(34), dp(22)).apply { leftMargin = dp(4) })
         lamp(col(LED_OFF), false)
         return bar
     }
@@ -556,7 +556,9 @@ class MainActivity : Activity(), DeckIO {
         codeIn = EditText(this).apply {
             val guardado = code
             setText(if (guardado.isEmpty()) "" else Pairing.bonito(guardado))
-            hint = "ABCD-EFGH-JKMN"
+            // La pista NO puede parecer un codigo: con "ABCD-EFGH-JKMN" se leia
+            // como si ya hubiera uno guardado.
+            hint = "12 símbolos"
             setSingleLine()
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or

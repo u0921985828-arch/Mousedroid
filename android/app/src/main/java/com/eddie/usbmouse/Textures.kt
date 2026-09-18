@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Shader
@@ -67,7 +68,17 @@ class MetalDrawable(
     private val bottom: Int,
     private val radius: Float,
     private val topOnly: Boolean = false,
-    private val brushAlpha: Int = 16
+    private val brushAlpha: Int = 16,
+    /**
+     * Radio por vertice, en el orden de Path: arriba-izq, arriba-der, abajo-der,
+     * abajo-izq (dos floats cada uno). Null = los cuatro a [radius].
+     *
+     * Hace falta porque una pieza metida dentro de otra tiene que **anidar**: si
+     * la banda de clic lleva 11 en las cuatro esquinas y el cristal 14 en las
+     * suyas, las dos curvas no encajan y la banda deja de leerse como el tercio
+     * bajo del mismo cristal para parecer tres pastillas ahi sueltas.
+     */
+    corners: FloatArray? = null
 ) : Drawable() {
 
     private val base = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -81,6 +92,18 @@ class MetalDrawable(
     private var suelto: LinearGradient? = null
     private var pulsado: LinearGradient? = null
     private var hundido = false
+
+    // Los caminos se arman en onBoundsChange, nunca por fotograma.
+    private val radii = FloatArray(8).also { r ->
+        when {
+            corners != null -> corners.copyInto(r)
+            topOnly -> { r[0] = radius; r[1] = radius; r[2] = radius; r[3] = radius }
+            else -> java.util.Arrays.fill(r, radius)
+        }
+    }
+    private val pFuera = Path()
+    private val pSuelto = Path()
+    private val pPulsado = Path()
 
     /**
      * Pulsar una tecla de metal no la vuelve translucida: le da la vuelta a la
@@ -100,21 +123,24 @@ class MetalDrawable(
         suelto = LinearGradient(0f, y0, 0f, y1, top, bottom, Shader.TileMode.CLAMP)
         pulsado = LinearGradient(0f, y0, 0f, y1,
             Monet.shade(bottom, 0.88f), Monet.shade(top, 0.88f), Shader.TileMode.CLAMP)
+
+        val l = b.left.toFloat(); val r = b.right.toFloat()
+        arma(pFuera, l, y0, r, y1)
+        arma(pSuelto, l, y0 + 1f, r, y1)     // filo de luz arriba
+        arma(pPulsado, l, y0, r, y1 - 1f)    // y abajo cuando se hunde
+    }
+
+    private fun arma(p: Path, l: Float, t: Float, r: Float, b: Float) {
+        p.reset()
+        rect.set(l, t, r, b)
+        p.addRoundRect(rect, radii, Path.Direction.CW)
     }
 
     override fun draw(canvas: Canvas) {
-        val b = bounds
-        // topOnly: se estira el rectangulo por debajo del recorte para que las
-        // esquinas de abajo caigan fuera y solo se redondeen las de arriba. Un
-        // Path costaria lo mismo de escribir pero se recrearia por fotograma.
-        val fondo = b.bottom.toFloat() + if (topOnly) radius else 0f
-        rect.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), fondo)
-        canvas.drawRoundRect(rect, radius, radius, bevel)
-        // el filo de luz cambia de lado: arriba suelto, abajo hundido
-        if (hundido) rect.bottom -= 1f else rect.top += 1f
+        canvas.drawPath(pFuera, bevel)
         base.shader = if (hundido) pulsado else suelto
-        canvas.drawRoundRect(rect, radius, radius, base)
-        canvas.drawRoundRect(rect, radius, radius, veta)
+        canvas.drawPath(if (hundido) pPulsado else pSuelto, base)
+        canvas.drawPath(if (hundido) pPulsado else pSuelto, veta)
     }
 
     override fun setAlpha(alpha: Int) { base.alpha = alpha }
@@ -150,7 +176,10 @@ class WindowDrawable(private val radius: Float) : Drawable() {
         set(v) {
             if (field == v) return
             field = v
-            fosforo.color = if (v == Color.TRANSPARENT) v else Monet.alpha(v, 24)
+            // Alfa 10 y no 24: con 24 el ambar de "buscando" dejaba el hueco en
+            // (41,38,31) —marron— dentro de una chapa fria de (42,45,47), y
+            // encima igual de claro que ella, asi que ni se leia como hundido.
+            fosforo.color = if (v == Color.TRANSPARENT) v else Monet.alpha(v, 10)
             invalidateSelf()
         }
 

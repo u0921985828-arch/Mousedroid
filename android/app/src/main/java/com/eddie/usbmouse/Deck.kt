@@ -21,8 +21,13 @@ import android.widget.LinearLayout
 fun dpOf(c: Context, v: Float) = (v * c.resources.displayMetrics.density).toInt()
 
 /** Chapa de metal cepillado con filo claro arriba, embutida en el chasis. */
-fun plate(c: Context, radius: Int, topOnly: Boolean = false): MetalDrawable =
-    MetalDrawable(Monet.plateHi, Monet.plateLo, dpOf(c, radius.toFloat()).toFloat(), topOnly)
+fun plate(c: Context, radius: Int, topOnly: Boolean = false,
+          corners: FloatArray? = null): MetalDrawable =
+    MetalDrawable(Monet.plateHi, Monet.plateLo, dpOf(c, radius.toFloat()).toFloat(),
+        topOnly, corners = corners)
+
+/** El radio del cristal. Lo que se meta dentro tiene que anidar con este. */
+fun glassRadius(c: Context) = dpOf(c, 14f).toFloat()
 
 // ---------------------------------------------------------------- señales
 
@@ -58,6 +63,16 @@ class GlyphView(context: Context, private val kind: String) : View(context) {
                 canvas.drawLine(cx, cy + 6f * d, cx, cy + 10.5f * d, p)
                 canvas.drawLine(cx - 10.5f * d, cy, cx - 6f * d, cy, p)
                 canvas.drawLine(cx + 6f * d, cy, cx + 10.5f * d, cy, p)
+            }
+            // Ajustes. Era un TextView con "·  ·  ·" a 12sp en etchDim: sobre la
+            // chapa no se veia, y es el unico camino a los ajustes que hay.
+            "menu" -> {
+                val paso = 5.5f * d
+                val r = 2.1f * d
+                val punto = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.color }
+                canvas.drawCircle(cx - paso, cy, r, punto)
+                canvas.drawCircle(cx, cy, r, punto)
+                canvas.drawCircle(cx + paso, cy, r, punto)
             }
             "dot1" -> canvas.drawCircle(cx, cy, 2.6f * d, fill)
             "dot2" -> {
@@ -199,7 +214,10 @@ class LedView(context: Context) : View(context) {
 class PipsView(context: Context, private val count: Int = 3) : View(context) {
 
     private val d = resources.displayMetrics.density
-    private val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 46, 48, 51) }
+    // Mas oscuro que la chapa, no mas claro: en (46,48,51) sobre una chapa de
+    // (42,45,47) el escalon apagado no se distinguia del fondo y parecia que solo
+    // habia dos. Oscuro se lee como un casquillo vacio, que es lo que es.
+    private val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 24, 26, 28) }
     private val on = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#9AA0A7") }
 
     var active = 0
@@ -294,8 +312,9 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
     }
 
     /** Boton de chapa con estado pulsado; sin etiqueta, la forma ya lo dice. */
-    private fun key(hold: Boolean, code: Char?, tag: String?, glyph: String? = null): View {
-        val v = FrameLayout(ctx).apply { background = plate(ctx, 12) }
+    private fun key(hold: Boolean, code: Char?, tag: String?, glyph: String? = null,
+                    esquinas: FloatArray? = null): View {
+        val v = FrameLayout(ctx).apply { background = plate(ctx, 12, corners = esquinas) }
         glyph?.let {
             v.addView(GlyphView(ctx, it), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         }
@@ -364,15 +383,27 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             addView(h, LayoutParams(h.size, h.size))
             if (withBand) {
                 val b = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-                b.addView(key(true, 'l', null), LinearLayout.LayoutParams(0, MATCH_PARENT, 3f))
+                // El clic es el tercio bajo de la MISMA lamina, no tres pastillas
+                // puestas encima: las tres zonas van a escuadra por dentro y solo
+                // los dos vertices que tocan el borde del cristal se redondean,
+                // con su mismo radio. Con 11 en las cuatro esquinas quedaban
+                // muescas de cristal entre zona y zona y bajo los extremos.
+                val rg = glassRadius(ctx)
+                val izq = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, rg, rg)
+                val der = floatArrayOf(0f, 0f, 0f, 0f, rg, rg, 0f, 0f)
+                val recto = FloatArray(8)
+                b.addView(key(true, 'l', null, esquinas = izq),
+                    LinearLayout.LayoutParams(0, MATCH_PARENT, 3f))
                 b.addView(hairline(), LinearLayout.LayoutParams(dp(1f), MATCH_PARENT).apply {
                     topMargin = dp(10f); bottomMargin = dp(10f)
                 })
-                b.addView(key(false, 'm', null), LinearLayout.LayoutParams(0, MATCH_PARENT, 2f))
+                b.addView(key(false, 'm', null, esquinas = recto),
+                    LinearLayout.LayoutParams(0, MATCH_PARENT, 2f))
                 b.addView(hairline(), LinearLayout.LayoutParams(dp(1f), MATCH_PARENT).apply {
                     topMargin = dp(10f); bottomMargin = dp(10f)
                 })
-                b.addView(key(true, 'r', null), LinearLayout.LayoutParams(0, MATCH_PARENT, 3f))
+                b.addView(key(true, 'r', null, esquinas = der),
+                    LinearLayout.LayoutParams(0, MATCH_PARENT, 3f))
                 addView(b, LayoutParams(MATCH_PARENT, 1, Gravity.BOTTOM))
                 band = b
             }
@@ -385,8 +416,11 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
                     Gravity.BOTTOM or Gravity.START, Gravity.BOTTOM or Gravity.END
                 )
                 val tags = arrayOf(Macro.G1, Macro.G2, Macro.G3, Macro.G4)
+                // Solo las de arriba tocan un vertice del cristal; las de abajo
+                // se apoyan sobre la banda y sus cuatro radios son iguales.
+                val vertices = intArrayOf(0, 1, -1, -1)
                 for (i in sitios.indices) {
-                    val c = corner(tags[i])
+                    val c = corner(tags[i], vertices[i])
                     addView(c, LayoutParams(1, 1, sitios[i]).apply {
                         setMargins(dp(6f), dp(6f), dp(6f), dp(6f))
                     })
@@ -412,10 +446,16 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
             band?.let { (it.layoutParams as LayoutParams).height = bandHeight(w, h) }
             val lado = (w * 0.26f).toInt()
             val alto = (h * 0.19f).toInt()
-            corners.forEach {
-                val lp = it.layoutParams as LayoutParams
+            // Las dos de abajo se suben por encima de la banda en vez de
+            // tumbarse encima. Apiladas eran tres rectangulos redondeados
+            // distintos en el mismo rincon, cada uno con su radio y su tono: no
+            // se entendia donde acababa un boton y empezaba el otro.
+            val suelo = (band?.let { (it.layoutParams as LayoutParams).height } ?: 0) + dp(6f)
+            corners.forEachIndexed { i, c ->
+                val lp = c.layoutParams as LayoutParams
                 lp.width = lado
                 lp.height = alto
+                if (i >= 2) lp.bottomMargin = suelo
             }
 
             // Se miden los hijos contra la altura DEFINITIVA. Midiendolos contra la
@@ -442,12 +482,28 @@ class Deck(private val ctx: Context, private val io: DeckIO) {
         }
     }
 
-    /** Zona macro de esquina: no es chapa, es una marca sobre el propio cristal. */
-    private fun corner(tag: String): View {
-        val idle = Color.argb(8, 255, 255, 255)
+    /**
+     * Zona macro de esquina: no es chapa, es una marca sobre el propio cristal.
+     *
+     * [esquina] dice cual de sus cuatro vertices toca un vertice del cristal, y
+     * ese lleva el radio anidado (14 del cristal menos los 6 de margen = 8). Con
+     * un radio uniforme de 12 quedaba una media luna de cristal entre las dos
+     * curvas: se veia que eran dos piezas que no encajan.
+     *
+     * Y lleva filo. Con solo un relleno de alfa 8 sobre 255 no se leia como una
+     * zona sino como una mancha en la pantalla.
+     */
+    private fun corner(tag: String, esquina: Int = -1): View {
+        val idle = Color.argb(12, 255, 255, 255)
+        val r = dp(6f).toFloat()
+        val rExt = dp(8f).toFloat()
         val fondo = GradientDrawable().apply {
             setColor(idle)
-            cornerRadius = dp(12f).toFloat()
+            // orden: arriba-izq, arriba-der, abajo-der, abajo-izq
+            val rr = FloatArray(8) { r }
+            if (esquina in 0..3) { rr[esquina * 2] = rExt; rr[esquina * 2 + 1] = rExt }
+            cornerRadii = rr
+            setStroke(dpOf(ctx, 1f), Color.argb(30, 255, 255, 255))
         }
         return View(ctx).apply {
             background = fondo

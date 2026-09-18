@@ -303,6 +303,17 @@ clic. **La superficie de trabajo no se toca nunca.** Umbral de pantalla corta: 6
   dejaba el Bluetooth entero muerto en automático —donde no se usa— si el usuario lo denegaba.
 - **`onRequestPermissionsResult` mira todos los resultados**, no `res[0]`: con una petición de
   dos, daba por concedido lo denegado y volvía a preguntar.
+- **Una pieza metida en otra tiene que ANIDAR el radio.** `MetalDrawable` acepta radio por
+  vértice (`corners`) justo para esto. La banda de clic va a escuadra por dentro y solo sus dos
+  vértices exteriores llevan `glassRadius`; con 11 en las cuatro esquinas dentro de un cristal de
+  14 quedaban muescas y la banda parecía tres pastillas sueltas en vez del tercio bajo de la
+  misma lámina. Lo mismo con las esquinas macro: la de arriba lleva el radio anidado
+  (14 − 6 de margen = 8) y las de abajo se suben por encima de la banda en vez de apilarse.
+- **El fósforo del lector va a alfa 10.** A 24, el ámbar de «buscando» dejaba el hueco en
+  `(41,38,31)` —marrón— dentro de una chapa fría de `(42,45,47)`, y encima igual de claro que
+  ella: no se leía como hundido.
+- **El escalón apagado de `PipsView` es más OSCURO que la chapa**, no más claro. En `(46,48,51)`
+  sobre `(42,45,47)` no se distinguía y parecía que solo había dos escalones.
 - **El aviso de «falta el código» es solo del modo CABLE.** En AUTO se comía los mensajes del
   Bluetooth —«Anunciado. Empareja desde la tele», «Conectado · Salón»— para quejarse de un PC
   que a lo mejor no existe, y el Bluetooth es justo lo que está pasando en ese momento.
@@ -329,6 +340,14 @@ no está, el APK de gradle. Se desactiva con `--no-install`, y la bandeja con `-
 `.github/workflows/build-apk.yml` compila el APK en un runner y lo sube como artefacto, más un
 trabajo de humo que lo arranca en un emulador. Es la salida cuando el entorno bloquea
 `dl.google.com` y no se puede resolver el plugin de Android.
+
+### Mirar la interfaz sin móvil
+
+`tools/render/render.sh` dibuja las mismas clases que van al APK a PNG con el
+Skia de verdad (Robolectric con `@GraphicsMode(NATIVE)`). Un modo por fichero, la
+Activity entera con su cabecera, las dos hojas de abajo, y las cotas de cada pieza
+en dp. **Es lo único que sirve para juzgar el diseño**: el compilador no ve que dos
+radios no encajen. Ver `tools/render/README.md`.
 
 Si ahí tampoco se puede, el Kotlin se puede *revisar* sin SDK: `org.robolectric:android-all`
 está en Maven Central y es el framework entero de API 34, así que `kotlinc` con ese jar en el
